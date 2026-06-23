@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Signed Strip Pop-up — 90° Coordinate Model</title>
+<style>
+  :root {
+    --bg: #f3eee2;
+    --panel: #fffdf7;
+    --ink: #17202a;
+    --cut: #111;
+    --fold: #2874a6;
+    --pos: #2e86c1;
+    --neg: #c0392b;
+    --hidden: #777;
+  }
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    font: 14px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  #app {
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+  header {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    background: #242424;
+    color: white;
+    padding: 7px 9px;
+  }
+  button, textarea, input {
+    font: inherit;
+  }
+  button {
+    padding: 5px 8px;
+    border-radius: 8px;
+    border: 1px solid #999;
+    background: white;
+    color: #111;
+  }
+  header label {
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
+    white-space: nowrap;
+  }
+  header input[type=range] { width: 90px; }
+
+  #panes {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(48px, 34fr) 8px minmax(48px, 33fr) 8px minmax(48px, 33fr);
+  }
+  .pane {
+    min-width: 0;
+    min-height: 0;
+    position: relative;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .gutter {
+    background: #d0c7b8;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .gutter::after {
+    content: "";
+    display: block;
+    width: 2px;
+    height: 44px;
+    margin: calc(50vh - 72px) auto 0;
+    background: rgba(0,0,0,.22);
+    border-radius: 4px;
+  }
+  .title {
+    position: absolute;
+    top: 8px;
+    left: 9px;
+    right: 9px;
+    z-index: 5;
+    display: flex;
+    gap: 6px;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: none;
+  }
+  .titleText {
+    padding: 4px 7px;
+    border-radius: 8px;
+    background: rgba(255,255,255,.86);
+  }
+  .title button {
+    pointer-events: auto;
+    padding: 3px 7px;
+    font-size: 12px;
+  }
+  .collapsed .titleText span.extra {
+    display: none;
+  }
+  .collapsed > *:not(.title) {
+    display: none !important;
+  }
+  #editorWrap {
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    box-sizing: border-box;
+    padding: 42px 9px 8px;
+    gap: 6px;
+  }
+  #data {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    resize: none;
+    border: 1px solid #bbb;
+    border-radius: 8px;
+    padding: 8px;
+    background: #fffefb;
+    font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  #status {
+    min-height: 2.7em;
+    color: #333;
+    font-size: 12px;
+    overflow: auto;
+  }
+  #status.bad { color: #a00000; }
+  #pattern, #view3d {
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+  }
+  #view3d {
+    background: linear-gradient(#fffdf7, #e8ddc8);
+  }
+  .legend {
+    position: absolute;
+    left: 9px;
+    bottom: 8px;
+    z-index: 5;
+    padding: 6px 8px;
+    background: rgba(255,255,255,.86);
+    border-radius: 8px;
+    font-size: 12px;
+  }
+  .sw {
+    display: inline-block;
+    width: 16px;
+    height: 0;
+    border-top: 3px solid;
+    vertical-align: middle;
+    margin-right: 3px;
+  }
+  @media (max-width: 850px) {
+    #panes {
+      grid-template-columns: 1fr;
+      grid-template-rows: minmax(48px, 30fr) 8px minmax(48px, 35fr) 8px minmax(48px, 35fr);
+    }
+    .gutter {
+      cursor: row-resize;
+    }
+    .gutter::after {
+      width: 44px;
+      height: 2px;
+      margin: 3px auto;
+    }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button id="ex1">Example A</button>
+    <button id="ex2">Example B</button>
+    <button id="apply">Apply data</button>
+    <button id="normalise">Pad totals</button>
+    <button id="resetPanes">Reset panes</button>
+    <label>Signed height scale <input id="heightScale" type="range" min="0" max="1.5" step="0.05" value="0.75"><span id="heightScaleText">0.75</span></label>
+    <span style="opacity:.78">3D: one finger rotate · two fingers zoom/pan</span>
+  </header>
+
+  <main id="panes">
+    <section class="pane" id="paneData">
+      <div class="title"><div class="titleText">Design data <span class="extra">(strip arrays)</span></div><button data-collapse="paneData">hide</button></div>
+      <div id="editorWrap">
+        <div style="font-size:12px;color:#555">
+          Paper: <code>x∈[0,W]</code>, flat <code>y∈[-H,H]</code>. Fold line is <code>y=0</code>. Lower half maps to <code>z=-y</code>, so lower edge starts at <code>z=H</code>.
+        </div>
+        <textarea id="data" spellcheck="false"></textarea>
+        <div id="status"></div>
+      </div>
+    </section>
+    <div class="gutter" data-gutter="0"></div>
+    <section class="pane" id="panePattern">
+      <div class="title"><div class="titleText">2D paper coordinates</div><button data-collapse="panePattern">hide</button></div>
+      <svg id="pattern"></svg>
+      <div class="legend">
+        <span class="sw" style="border-color:var(--cut)"></span>strip cuts
+        &nbsp;<span class="sw" style="border-color:var(--fold);border-top-style:dashed"></span>folds
+      </div>
+    </section>
+    <div class="gutter" data-gutter="1"></div>
+    <section class="pane" id="pane3d">
+      <div class="title"><div class="titleText">90° folded quad mesh</div><button data-collapse="pane3d">hide</button></div>
+      <canvas id="view3d"></canvas>
+      <div class="legend">
+        <span class="sw" style="border-color:var(--pos)"></span>positive
+        &nbsp;<span class="sw" style="border-color:var(--neg)"></span>negative
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+
+/*
+  Signed Strip Pop-up — 90° coordinate model
+  ------------------------------------------
+
+  Flat paper coordinates:
+    x in [0, W]
+    y in [-H, H]
+    origin = left edge, halfway up the paper
+    paper size = W by 2H
+
+  90° folded backing sheet:
+    upper half, y >= 0:  (X,Y,Z) = (x, y, 0)
+    lower half, y <= 0:  (X,Y,Z) = (x, 0, -y)
+    therefore the lower edge y=-H is at z=H.
+
+  Strip data:
+    widths: [w_i]
+    strips[i]: [l_i1, l_i2, ...]
+    sum_j l_ij must be 2H for every strip.
+    Each strip begins at flat y=-H, hence in 3D at z=H.
+
+  Mesh convention for the signed pop-up strip:
+    Let t run along the strip from 0 to 2H, starting at the lower edge.
+    In 90° coordinates, the run coordinate is z = H - t.
+    The j-th length interval occupies z in [H-cum[j], H-cum[j+1]].
+    Its sign alternates +, -, +, - from j=0.
+
+    This app renders each interval as a horizontal quad at signed height
+      Y = sign * heightScale * length
+    plus vertical connector quads at fold boundaries. The backing sheet is
+    rendered literally as the two 90° half-sheets.
+
+  So: the coordinate convention and "start at z=H" are literal. The remaining
+  modelling choice is how signed lengths determine the height of the pop-up
+  interval. That is concentrated in signedHeight(length, sign).
+*/
+
+const exampleA = {
+  widths: [1, 1, 1, 1, 1, 1],
+  strips: [
+    [0.0, 1.0, 1.0, 1.0, 1.0],
+    [0.5, 0.5, 1.0, 1.0, 1.0],
+    [1.0, 0.5, 0.5, 1.0, 1.0],
+    [1.0, 1.0, 0.5, 0.5, 1.0],
+    [0.5, 1.0, 1.0, 0.5, 1.0],
+    [0.0, 1.0, 1.0, 1.0, 1.0]
+  ]
+};
+
+const exampleB = {
+  widths: [0.8, 1.2, 1.2, 1.2, 0.8],
+  strips: [
+    [0.4, 0.8, 0.8, 1.0, 1.0],
+    [0.0, 1.4, 0.8, 0.8, 1.0],
+    [1.0, 0.4, 1.2, 0.4, 1.0],
+    [0.0, 1.4, 0.8, 0.8, 1.0],
+    [0.4, 0.8, 0.8, 1.0, 1.0]
+  ]
+};
+
+let design = structuredClone(exampleA);
+let heightScale = 0.75;
+
+let cam = { rx: -0.58, ry: 0.72, zoom: 92, panX: 0, panY: 0 };
+
+const panes = document.getElementById("panes");
+const dataEl = document.getElementById("data");
+const statusEl = document.getElementById("status");
+const pattern = document.getElementById("pattern");
+const canvas = document.getElementById("view3d");
+const ctx = canvas.getContext("2d");
+
+function pretty(obj) { return JSON.stringify(obj, null, 2); }
+function sum(a) { return a.reduce((x,y)=>x+y,0); }
+function cumulative(a) {
+  const out = [0];
+  for (const x of a) out.push(out[out.length-1] + x);
+  return out;
+}
+
+function paperParams() {
+  const W = sum(design.widths);
+  const twoH = sum(design.strips[0]);
+  return { W, H: twoH/2, twoH };
+}
+
+function signedHeight(length, sign) {
+  return sign * heightScale * length;
+}
+
+function setExample(obj) {
+  design = structuredClone(obj);
+  dataEl.value = pretty(design);
+  renderAll();
+}
+
+function validate(d) {
+  if (!d || !Array.isArray(d.widths) || !Array.isArray(d.strips)) {
+    return "Expected { widths: [...], strips: [[...], ...] }";
+  }
+  if (d.widths.length !== d.strips.length) {
+    return "widths.length must equal strips.length.";
+  }
+  if (!d.widths.every(x => Number.isFinite(x) && x > 0)) {
+    return "Every width must be a positive number.";
+  }
+  const totals = [];
+  for (let i=0; i<d.strips.length; i++) {
+    const s = d.strips[i];
+    if (!Array.isArray(s) || s.length < 1) return "Every strip must be a non-empty length array.";
+    if (!s.every(x => Number.isFinite(x) && x >= 0)) return "Every strip length must be non-negative.";
+    totals.push(sum(s));
+  }
+  const t0 = totals[0];
+  const maxDiff = Math.max(...totals.map(t => Math.abs(t - t0)));
+  if (maxDiff > 1e-6) {
+    return "Invariant violation: strip totals differ. Totals = [" + totals.map(x => x.toFixed(3)).join(", ") + "]";
+  }
+  if (t0 <= 0) return "Total strip length must be positive.";
+  return "";
+}
+
+function parseData() {
+  let obj;
+  try { obj = JSON.parse(dataEl.value); }
+  catch(e) { return {ok:false, error:"JSON parse error: " + e.message}; }
+  const err = validate(obj);
+  if (err) return {ok:false, error:err};
+  design = obj;
+  return {ok:true};
+}
+
+function padTotals() {
+  const r = parseData();
+  if (!r.ok) { showStatus(r.error, true); return; }
+  const totals = design.strips.map(sum);
+  const target = Math.max(...totals);
+  design.strips = design.strips.map((s,i) => {
+    const extra = target - totals[i];
+    return extra > 1e-9 ? s.concat([extra]) : s;
+  });
+  dataEl.value = pretty(design);
+  renderAll();
+}
+
+function showStatus(msg, bad=false) {
+  statusEl.className = bad ? "bad" : "";
+  statusEl.textContent = msg;
+}
+
+function renderAll() {
+  const err = validate(design);
+  if (err) {
+    showStatus(err, true);
+    return;
+  }
+  const {W,H,twoH} = paperParams();
+  showStatus(`OK. Paper W=${W.toFixed(3)}, H=${H.toFixed(3)}, size W×2H=${W.toFixed(3)}×${twoH.toFixed(3)}. Every strip begins at lower edge y=-H, hence z=H.`);
+  drawPattern();
+  draw3D();
+}
+
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  renderAll();
+}
+
+function drawPattern() {
+  const r = pattern.getBoundingClientRect();
+  const width = r.width, height = r.height;
+  pattern.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  pattern.innerHTML = "";
+
+  const {W,H,twoH} = paperParams();
+  const margin = 42;
+  const s = Math.min((width - 2*margin)/W, (height - 2*margin)/twoH);
+  const ox = (width - W*s)/2;
+  const oy = height/2; // flat y=0 fold line
+
+  function el(name) { return document.createElementNS("http://www.w3.org/2000/svg", name); }
+  function line(x1,y1,x2,y2, stroke, dash="", lw=1.4) {
+    const e = el("line");
+    e.setAttribute("x1",x1); e.setAttribute("y1",y1);
+    e.setAttribute("x2",x2); e.setAttribute("y2",y2);
+    e.setAttribute("stroke",stroke);
+    e.setAttribute("stroke-width",lw);
+    e.setAttribute("stroke-linecap","round");
+    if (dash) e.setAttribute("stroke-dasharray",dash);
+    pattern.appendChild(e);
+  }
+  function rect(x,y,w,h,fill,stroke="#ddd",lw=1) {
+    const e = el("rect");
+    e.setAttribute("x",x); e.setAttribute("y",y);
+    e.setAttribute("width",w); e.setAttribute("height",h);
+    e.setAttribute("fill",fill);
+    e.setAttribute("stroke",stroke);
+    e.setAttribute("stroke-width",lw);
+    pattern.appendChild(e);
+  }
+  function text(x,y,t,anchor="start") {
+    const e = el("text");
+    e.setAttribute("x",x); e.setAttribute("y",y);
+    e.setAttribute("font-size","11");
+    e.setAttribute("fill","#555");
+    e.setAttribute("text-anchor",anchor);
+    e.textContent = t;
+    pattern.appendChild(e);
+  }
+
+  const paperTop = oy - H*s;
+  const paperBottom = oy + H*s;
+
+  // background halves
+  rect(ox, paperTop, W*s, H*s, "rgba(255,255,250,.95)", "#bbb", 1);
+  rect(ox, oy, W*s, H*s, "rgba(245,239,225,.95)", "#bbb", 1);
+
+  // paper outline and main fold
+  rect(ox, paperTop, W*s, twoH*s, "transparent", "#888", 1.5);
+  line(ox, oy, ox + W*s, oy, "#2874a6", "8 5", 2.2);
+  text(ox + 4, oy - 8, "origin line y=0, 90° fold");
+  text(ox + W*s + 6, paperTop + 4, "y=H");
+  text(ox + W*s + 6, oy + 4, "y=0");
+  text(ox + W*s + 6, paperBottom, "y=-H → z=H", "start");
+
+  let x = ox;
+  for (let i=0; i<design.widths.length; i++) {
+    const stripW = design.widths[i] * s;
+    const strip = design.strips[i];
+    const cs = cumulative(strip);
+
+    // strip regions from y=-H upward. screen y decreases as flat y increases.
+    for (let j=0; j<strip.length; j++) {
+      const t0 = cs[j], t1 = cs[j+1];       // t from lower edge
+      const flatY0 = -H + t0;
+      const flatY1 = -H + t1;
+      const screenY1 = oy - flatY1*s;       // top of region on screen
+      const h = (flatY1-flatY0)*s;
+      const pos = (j % 2) === 0;
+      rect(x, screenY1, stripW, h, pos ? "rgba(46,134,193,.13)" : "rgba(192,57,43,.11)", "none", 0);
+    }
+
+    // folds at cumulative positions
+    for (let j=1; j<cs.length-1; j++) {
+      const flatY = -H + cs[j];
+      const yy = oy - flatY*s;
+      line(x, yy, x+stripW, yy, "#2874a6", "6 5", 1.35);
+    }
+
+    // cuts / strip boundaries
+    line(x, paperTop, x, paperBottom, "#111", "", i===0 ? 2.0 : 1.3);
+    x += stripW;
+  }
+  line(x, paperTop, x, paperBottom, "#111", "", 2.0);
+  text(ox, paperBottom + 16, "The strip traversal starts here: flat y=-H, folded z=H.");
+}
+
+function stripXPositions() {
+  const xs = [0];
+  for (const w of design.widths) xs.push(xs[xs.length-1] + w);
+  return xs; // literal x in [0,W]
+}
+
+function buildQuads() {
+  const {W,H,twoH} = paperParams();
+  const xs = stripXPositions();
+  const quads = [];
+
+  // Literal backing sheet at 90 degrees.
+  // Lower half: flat y in [-H,0] maps to horizontal floor Y=0, Z=-y, hence z in [0,H].
+  quads.push({
+    pts: [[0,0,H],[W,0,H],[W,0,0],[0,0,0]],
+    kind: "lowerSheet",
+    sign: 0
+  });
+
+  // Upper half: flat y in [0,H] maps to vertical wall Y=y, Z=0.
+  quads.push({
+    pts: [[0,0,0],[W,0,0],[W,H,0],[0,H,0]],
+    kind: "upperSheet",
+    sign: 0
+  });
+
+  // Signed strip mesh starts at z=H and walks toward z=-H as t goes 0..2H.
+  for (let i=0; i<design.strips.length; i++) {
+    const x0 = xs[i], x1 = xs[i+1];
+    const strip = design.strips[i];
+    const cs = cumulative(strip);
+    let prevY = 0;
+
+    for (let j=0; j<strip.length; j++) {
+      const L = strip[j];
+      const sign = (j % 2) === 0 ? +1 : -1;
+      const t0 = cs[j], t1 = cs[j+1];
+      const z0 = H - t0;
+      const z1 = H - t1;
+      const y = signedHeight(L, sign);
+
+      // Vertical connector at the fold boundary before this signed interval.
+      if (Math.abs(y - prevY) > 1e-9) {
+        quads.push({
+          pts: [[x0,prevY,z0],[x1,prevY,z0],[x1,y,z0],[x0,y,z0]],
+          kind: "verticalConnector",
+          sign: Math.sign(y - prevY)
+        });
+      }
+
+      // Horizontal signed quad for the interval.
+      if (L > 1e-9) {
+        quads.push({
+          pts: [[x0,y,z0],[x1,y,z0],[x1,y,z1],[x0,y,z1]],
+          kind: "signedHorizontal",
+          sign
+        });
+      }
+
+      prevY = y;
+    }
+
+    // Connector back to the backing plane at the far end y=+H, z=-H.
+    const zEnd = H - cs[cs.length-1]; // should be -H
+    if (Math.abs(prevY) > 1e-9) {
+      quads.push({
+        pts: [[x0,prevY,zEnd],[x1,prevY,zEnd],[x1,0,zEnd],[x0,0,zEnd]],
+        kind: "verticalConnector",
+        sign: -Math.sign(prevY)
+      });
+    }
+  }
+
+  return quads;
+}
+
+function rotatePoint(p, rx, ry) {
+  let [x,y,z] = p;
+  const {W,H} = paperParams();
+  // centre about the 90-degree corner region for nicer orbit
+  x -= W/2;
+  y -= H/4;
+  z -= 0;
+
+  // rotate about X
+  let c = Math.cos(rx), s = Math.sin(rx);
+  let y1 = y*c - z*s;
+  let z1 = y*s + z*c;
+  y = y1; z = z1;
+
+  // rotate about Y
+  c = Math.cos(ry); s = Math.sin(ry);
+  let x1 = x*c + z*s;
+  let z2 = -x*s + z*c;
+  x = x1; z = z2;
+
+  return [x,y,z];
+}
+
+function project(p) {
+  const r = canvas.getBoundingClientRect();
+  const q = rotatePoint(p, cam.rx, cam.ry);
+  const persp = 700 / (700 + q[2]*cam.zoom*0.035);
+  return [
+    r.width/2 + cam.panX + q[0]*cam.zoom*persp,
+    r.height/2 + cam.panY - q[1]*cam.zoom*persp,
+    q[2]
+  ];
+}
+
+function drawPoly(pts, fill, stroke="#222", lw=1.05) {
+  const ps = pts.map(project);
+  ctx.beginPath();
+  ctx.moveTo(ps[0][0], ps[0][1]);
+  for (let i=1; i<ps.length; i++) ctx.lineTo(ps[i][0], ps[i][1]);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = lw;
+  ctx.stroke();
+}
+
+function drawLine3(a,b, stroke="#333", lw=1.4, dash=[]) {
+  const pa = project(a), pb = project(b);
+  ctx.save();
+  ctx.setLineDash(dash);
+  ctx.beginPath();
+  ctx.moveTo(pa[0], pa[1]);
+  ctx.lineTo(pb[0], pb[1]);
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = lw;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function draw3D() {
+  const r = canvas.getBoundingClientRect();
+  ctx.clearRect(0,0,r.width,r.height);
+
+  const quads = buildQuads();
+  quads.forEach(q => {
+    q.depth = q.pts.reduce((acc,p) => acc + rotatePoint(p, cam.rx, cam.ry)[2], 0) / q.pts.length;
+  });
+  quads.sort((a,b) => a.depth - b.depth);
+
+  for (const q of quads) {
+    let fill;
+    if (q.kind === "lowerSheet") fill = "rgba(244,238,222,.70)";
+    else if (q.kind === "upperSheet") fill = "rgba(255,255,250,.70)";
+    else if (q.kind === "verticalConnector") fill = "rgba(224,220,205,.76)";
+    else fill = q.sign > 0 ? "rgba(46,134,193,.70)" : "rgba(192,57,43,.64)";
+    drawPoly(q.pts, fill, "#202020", q.kind.includes("Sheet") ? 1.0 : 1.2);
+  }
+
+  const {W,H} = paperParams();
+  // key coordinate guides
+  drawLine3([0,0,0],[W,0,0], "#2874a6", 2.0, [8,5]); // fold axis
+  drawLine3([0,0,H],[W,0,H], "#555", 1.3, [5,5]);     // strip start edge
+  drawLine3([0,0,0],[0,H,0], "#444", 1.2, []);
+  drawLine3([0,0,0],[0,0,H], "#444", 1.2, []);
+
+  ctx.fillStyle = "rgba(0,0,0,.60)";
+  ctx.font = "12px -apple-system, BlinkMacSystemFont, sans-serif";
+  ctx.fillText("Backing sheet is literal: upper half is vertical, lower half is horizontal. Strip start edge is z=H.", 10, r.height - 12);
+}
+
+// 3D canvas gestures
+let pointers = new Map();
+let lastSingle = null;
+let lastPinch = null;
+
+canvas.addEventListener("pointerdown", ev => {
+  canvas.setPointerCapture(ev.pointerId);
+  pointers.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+  if (pointers.size === 1) lastSingle = {x:ev.clientX, y:ev.clientY};
+  if (pointers.size === 2) lastPinch = pinchState();
+});
+canvas.addEventListener("pointermove", ev => {
+  if (!pointers.has(ev.pointerId)) return;
+  pointers.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+
+  if (pointers.size === 1 && lastSingle) {
+    const p = [...pointers.values()][0];
+    const dx = p.x - lastSingle.x;
+    const dy = p.y - lastSingle.y;
+    cam.ry += dx * 0.008;
+    cam.rx += dy * 0.008;
+    cam.rx = Math.max(-1.5, Math.min(1.5, cam.rx));
+    lastSingle = {x:p.x, y:p.y};
+    draw3D();
+  } else if (pointers.size === 2 && lastPinch) {
+    const now = pinchState();
+    cam.zoom *= now.dist / Math.max(1, lastPinch.dist);
+    cam.zoom = Math.max(25, Math.min(260, cam.zoom));
+    cam.panX += now.cx - lastPinch.cx;
+    cam.panY += now.cy - lastPinch.cy;
+    lastPinch = now;
+    draw3D();
+  }
+});
+canvas.addEventListener("pointerup", endCanvasPointer);
+canvas.addEventListener("pointercancel", endCanvasPointer);
+
+function endCanvasPointer(ev) {
+  pointers.delete(ev.pointerId);
+  lastSingle = pointers.size === 1 ? {...[...pointers.values()][0]} : null;
+  lastPinch = pointers.size === 2 ? pinchState() : null;
+}
+
+function pinchState() {
+  const ps = [...pointers.values()];
+  const a = ps[0], b = ps[1];
+  const dx = b.x-a.x, dy = b.y-a.y;
+  return { dist: Math.hypot(dx,dy), cx: (a.x+b.x)/2, cy: (a.y+b.y)/2 };
+}
+
+// Resizable panes and collapse controls
+const paneIds = ["paneData", "panePattern", "pane3d"];
+let paneWeights = [34,33,33];
+
+function applyPaneWeights() {
+  const isNarrow = window.matchMedia("(max-width: 850px)").matches;
+  const parts = [
+    `minmax(48px, ${paneWeights[0]}fr)`,
+    "8px",
+    `minmax(48px, ${paneWeights[1]}fr)`,
+    "8px",
+    `minmax(48px, ${paneWeights[2]}fr)`
+  ].join(" ");
+  if (isNarrow) panes.style.gridTemplateRows = parts;
+  else panes.style.gridTemplateColumns = parts;
+  resize();
+}
+
+function resetPanes() {
+  paneWeights = [34,33,33];
+  for (const id of paneIds) {
+    const p = document.getElementById(id);
+    p.classList.remove("collapsed");
+    const b = p.querySelector("button[data-collapse]");
+    b.textContent = "hide";
+  }
+  applyPaneWeights();
+}
+
+let dragGutter = null;
+document.querySelectorAll(".gutter").forEach(g => {
+  g.addEventListener("pointerdown", ev => {
+    g.setPointerCapture(ev.pointerId);
+    const idx = Number(g.dataset.gutter);
+    dragGutter = {
+      idx,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      weights: paneWeights.slice()
+    };
+  });
+  g.addEventListener("pointermove", ev => {
+    if (!dragGutter) return;
+    const isNarrow = window.matchMedia("(max-width: 850px)").matches;
+    const delta = isNarrow ? ev.clientY - dragGutter.startY : ev.clientX - dragGutter.startX;
+    const rect = panes.getBoundingClientRect();
+    const totalPixels = isNarrow ? rect.height : rect.width;
+    const deltaFr = delta / Math.max(1,totalPixels) * sum(dragGutter.weights);
+    const i = dragGutter.idx;
+    const a = Math.max(5, dragGutter.weights[i] + deltaFr);
+    const b = Math.max(5, dragGutter.weights[i+1] - deltaFr);
+    paneWeights = dragGutter.weights.slice();
+    paneWeights[i] = a;
+    paneWeights[i+1] = b;
+    applyPaneWeights();
+  });
+  g.addEventListener("pointerup", () => { dragGutter = null; });
+  g.addEventListener("pointercancel", () => { dragGutter = null; });
+});
+
+document.querySelectorAll("button[data-collapse]").forEach(b => {
+  b.addEventListener("click", () => {
+    const id = b.dataset.collapse;
+    const idx = paneIds.indexOf(id);
+    const pane = document.getElementById(id);
+    const nowCollapsed = !pane.classList.contains("collapsed");
+    pane.classList.toggle("collapsed", nowCollapsed);
+    b.textContent = nowCollapsed ? "show" : "hide";
+    if (nowCollapsed) {
+      paneWeights[idx] = 5;
+    } else {
+      paneWeights[idx] = 30;
+    }
+    applyPaneWeights();
+  });
+});
+
+// Buttons
+document.getElementById("ex1").addEventListener("click", () => setExample(exampleA));
+document.getElementById("ex2").addEventListener("click", () => setExample(exampleB));
+document.getElementById("apply").addEventListener("click", () => {
+  const r = parseData();
+  if (!r.ok) showStatus(r.error, true);
+  else renderAll();
+});
+document.getElementById("normalise").addEventListener("click", padTotals);
+document.getElementById("resetPanes").addEventListener("click", resetPanes);
+document.getElementById("heightScale").addEventListener("input", ev => {
+  heightScale = Number(ev.target.value);
+  document.getElementById("heightScaleText").textContent = heightScale.toFixed(2);
+  draw3D();
+});
+
+window.addEventListener("resize", applyPaneWeights);
+dataEl.value = pretty(design);
+applyPaneWeights();
+</script>
+</body>
+</html>

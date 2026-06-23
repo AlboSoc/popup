@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Signed Extrusion Pop-up Sketcher</title>
+<style>
+  :root {
+    --bg: #f6f3ea;
+    --panel: #fffdf6;
+    --ink: #17202a;
+    --cut: #111;
+    --mountain: #c0392b;
+    --valley: #2874a6;
+    --soft: #777;
+  }
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    font: 14px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  #app {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    height: 100%;
+  }
+  header {
+    padding: 8px 10px;
+    background: #252525;
+    color: white;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  header button, header select {
+    font: inherit;
+    padding: 5px 8px;
+    border-radius: 8px;
+    border: 1px solid #999;
+    background: white;
+    color: #111;
+  }
+  header label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  header input[type=range] {
+    width: 120px;
+  }
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 0;
+  }
+  section {
+    min-width: 0;
+    min-height: 0;
+    position: relative;
+    border-right: 1px solid #ccc;
+  }
+  section:last-child { border-right: 0; }
+  .title {
+    position: absolute;
+    left: 10px;
+    top: 8px;
+    z-index: 5;
+    background: rgba(255,255,255,0.82);
+    padding: 4px 7px;
+    border-radius: 8px;
+    pointer-events: none;
+  }
+  #pattern {
+    width: 100%;
+    height: 100%;
+    background: var(--panel);
+    touch-action: none;
+  }
+  #view3d {
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: linear-gradient(#fdfbf3, #e9e1cf);
+    touch-action: none;
+  }
+  .legend {
+    position: absolute;
+    left: 10px;
+    bottom: 8px;
+    background: rgba(255,255,255,0.82);
+    padding: 6px 8px;
+    border-radius: 8px;
+    font-size: 12px;
+  }
+  .swatch {
+    display: inline-block;
+    width: 18px;
+    height: 0;
+    border-top: 2px solid;
+    vertical-align: middle;
+    margin-right: 4px;
+  }
+  @media (max-width: 760px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 48% 52%; }
+    section { border-right: 0; border-bottom: 1px solid #ccc; }
+    section:last-child { border-bottom: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button id="demo1">Demo: alternating</button>
+    <button id="demo2">Demo: tower field</button>
+    <button id="clear">Clear</button>
+    <label>Mode
+      <select id="mode">
+        <option value="toggle">tap cell: empty → outward → inward</option>
+        <option value="out">paint outward</option>
+        <option value="in">paint inward</option>
+        <option value="erase">erase</option>
+      </select>
+    </label>
+    <label>Fold <input id="fold" type="range" min="0" max="90" value="75"> <span id="foldText">75°</span></label>
+    <span style="opacity:.8">1 finger rotate · 2 fingers zoom/pan · tap 2D grid to edit</span>
+  </header>
+
+  <main>
+    <section>
+      <div class="title">2D cut/fold pattern</div>
+      <svg id="pattern"></svg>
+      <div class="legend">
+        <span class="swatch" style="border-color:var(--cut)"></span>cut
+        &nbsp; <span class="swatch" style="border-color:var(--valley); border-top-style:dashed"></span>valley fold
+        &nbsp; <span class="swatch" style="border-color:var(--mountain); border-top-style:dotted"></span>mountain fold
+      </div>
+    </section>
+    <section>
+      <div class="title">3D folded state</div>
+      <canvas id="view3d"></canvas>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+
+/*
+  Signed Extrusion Pop-up Sketcher
+  --------------------------------
+  This is deliberately small and hackable.
+
+  Conceptual model:
+    - A pop-up design is a set of rectangular cells on an x-grid.
+    - Each cell has a sign:
+        +1 = outward extrusion
+        -1 = inward extrusion
+         0 = absent
+    - The 3D model is not yet a full rigid-origami solver. It is a constructive
+      signed cuboid preview: a folded backing sheet plus cuboidal protrusions.
+    - The 2D pattern view shows the associated cut/fold grammar.
+
+  Useful next experiments:
+    - Replace rectangular cells with operators: union, difference, mirror, repeat.
+    - Add constraint checks: collisions, overlapping cuts, fold assignment conflicts.
+    - Make height/depth independent per cell.
+    - Add export as SVG.
+*/
+
+const W = 8;              // grid cells in x
+const H = 5;              // grid cells in z/height
+const cellSize = 1.0;
+let cells = Array.from({length:H}, () => Array(W).fill(0));
+
+let foldDeg = 75;
+
+// Camera
+let cam = {
+  rx: -0.45,
+  ry: 0.55,
+  zoom: 85,
+  panX: 0,
+  panY: 0
+};
+
+const pattern = document.getElementById("pattern");
+const canvas = document.getElementById("view3d");
+const ctx = canvas.getContext("2d");
+
+function constructiveDemoAlternating() {
+  clearCells();
+  addRect(1, 0, 2, 1, +1);
+  addRect(4, 0, 2, 1, -1);
+  addRect(2, 1, 2, 1, +1);
+  addRect(5, 2, 2, 1, -1);
+  addRect(0, 3, 2, 1, +1);
+  render();
+}
+
+function constructiveDemoTowerField() {
+  clearCells();
+  addRect(1, 0, 1, 1, +1);
+  addRect(2, 0, 1, 2, +1);
+  addRect(3, 0, 1, 3, +1);
+  addRect(4, 0, 1, 3, -1);
+  addRect(5, 0, 1, 2, -1);
+  addRect(6, 0, 1, 1, -1);
+  render();
+}
+
+// Constructive operator #1: add signed rectangular block of cells.
+function addRect(x, z, w, h, sign) {
+  for (let j=z; j<z+h; j++) {
+    for (let i=x; i<x+w; i++) {
+      if (j>=0 && j<H && i>=0 && i<W) cells[j][i] = sign;
+    }
+  }
+}
+
+// Constructive operator #2: mirror signs horizontally.
+function mirrorX() {
+  for (let j=0; j<H; j++) cells[j].reverse();
+}
+
+// Constructive operator #3: invert inside/outside.
+function invertSigns() {
+  for (let j=0; j<H; j++) {
+    for (let i=0; i<W; i++) cells[j][i] = -cells[j][i];
+  }
+}
+
+function clearCells() {
+  cells = Array.from({length:H}, () => Array(W).fill(0));
+}
+
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  render();
+}
+
+function render() {
+  drawPattern();
+  draw3D();
+}
+
+function drawPattern() {
+  const r = pattern.getBoundingClientRect();
+  const width = r.width, height = r.height;
+  pattern.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  pattern.innerHTML = "";
+
+  const margin = 45;
+  const usableW = width - 2*margin;
+  const usableH = height - 2*margin;
+  const sx = usableW / (W + 2);
+  const sy = usableH / (2*H + 2);
+  const s = Math.min(sx, sy);
+  const ox = width/2 - W*s/2;
+  const oy = height/2;
+
+  function line(x1,y1,x2,y2, cls, dash="", width=2) {
+    const e = document.createElementNS("http://www.w3.org/2000/svg","line");
+    e.setAttribute("x1", x1); e.setAttribute("y1", y1);
+    e.setAttribute("x2", x2); e.setAttribute("y2", y2);
+    e.setAttribute("stroke-width", width);
+    e.setAttribute("stroke-linecap", "round");
+    if (cls === "cut") e.setAttribute("stroke", "#111");
+    if (cls === "valley") e.setAttribute("stroke", "#2874a6");
+    if (cls === "mountain") e.setAttribute("stroke", "#c0392b");
+    if (dash) e.setAttribute("stroke-dasharray", dash);
+    pattern.appendChild(e);
+  }
+  function rect(x,y,w,h, fill, stroke="#ddd") {
+    const e = document.createElementNS("http://www.w3.org/2000/svg","rect");
+    e.setAttribute("x", x); e.setAttribute("y", y);
+    e.setAttribute("width", w); e.setAttribute("height", h);
+    e.setAttribute("fill", fill);
+    e.setAttribute("stroke", stroke);
+    e.setAttribute("stroke-width", 1);
+    pattern.appendChild(e);
+  }
+  function text(x,y,t) {
+    const e = document.createElementNS("http://www.w3.org/2000/svg","text");
+    e.setAttribute("x", x); e.setAttribute("y", y);
+    e.setAttribute("font-size", "12");
+    e.setAttribute("fill", "#555");
+    e.textContent = t;
+    pattern.appendChild(e);
+  }
+
+  // page outline and main fold
+  rect(ox - s, oy - (H+0.7)*s, (W+2)*s, (2*H+1.4)*s, "#fffdf6", "#bbb");
+  line(ox - s, oy, ox + (W+1)*s, oy, "valley", "8 6", 2);
+  text(ox - s, oy - 8, "main fold");
+
+  // edit grid
+  for (let j=0; j<H; j++) {
+    for (let i=0; i<W; i++) {
+      const x = ox + i*s;
+      const y = oy - (j+1)*s;
+      const sign = cells[j][i];
+      rect(x, y, s, s, sign > 0 ? "rgba(46,134,193,.16)" : sign < 0 ? "rgba(192,57,43,.14)" : "rgba(0,0,0,.025)", "#e0e0e0");
+      if (sign) {
+        // A simplified OA/kirigami net mark for this cell:
+        // vertical sides are cuts; upper/lower horizontals are fold assignments.
+        line(x, oy - (j+1)*s, x, oy + (j+1)*s, "cut", "", 2.2);
+        line(x+s, oy - (j+1)*s, x+s, oy + (j+1)*s, "cut", "", 2.2);
+
+        if (sign > 0) {
+          line(x, oy - (j+1)*s, x+s, oy - (j+1)*s, "mountain", "2 5", 2.0);
+          line(x, oy + (j+1)*s, x+s, oy + (j+1)*s, "valley", "8 5", 2.0);
+        } else {
+          line(x, oy - (j+1)*s, x+s, oy - (j+1)*s, "valley", "8 5", 2.0);
+          line(x, oy + (j+1)*s, x+s, oy + (j+1)*s, "mountain", "2 5", 2.0);
+        }
+      }
+    }
+  }
+
+  // clickable transparent grid over top half
+  for (let j=0; j<H; j++) {
+    for (let i=0; i<W; i++) {
+      const hit = document.createElementNS("http://www.w3.org/2000/svg","rect");
+      hit.setAttribute("x", ox+i*s); hit.setAttribute("y", oy-(j+1)*s);
+      hit.setAttribute("width", s); hit.setAttribute("height", s);
+      hit.setAttribute("fill", "transparent");
+      hit.style.cursor = "pointer";
+      hit.addEventListener("pointerdown", (ev) => {
+        ev.preventDefault();
+        editCell(i,j);
+      });
+      pattern.appendChild(hit);
+    }
+  }
+}
+
+function editCell(i,j) {
+  const mode = document.getElementById("mode").value;
+  if (mode === "toggle") {
+    cells[j][i] = cells[j][i] === 0 ? +1 : cells[j][i] === +1 ? -1 : 0;
+  } else if (mode === "out") {
+    cells[j][i] = +1;
+  } else if (mode === "in") {
+    cells[j][i] = -1;
+  } else {
+    cells[j][i] = 0;
+  }
+  render();
+}
+
+function rotatePoint(p, rx, ry) {
+  let [x,y,z] = p;
+  // rotate about X
+  let cy = Math.cos(rx), sy = Math.sin(rx);
+  let y1 = y*cy - z*sy;
+  let z1 = y*sy + z*cy;
+  y = y1; z = z1;
+  // rotate about Z-ish/Y screen orbit: actual y-axis
+  let cx = Math.cos(ry), sx = Math.sin(ry);
+  let x1 = x*cx + z*sx;
+  let z2 = -x*sx + z*cx;
+  x = x1; z = z2;
+  return [x,y,z];
+}
+
+function project(p) {
+  const rect = canvas.getBoundingClientRect();
+  const q = rotatePoint(p, cam.rx, cam.ry);
+  const persp = 600 / (600 + q[2]*cam.zoom*0.02);
+  return [
+    rect.width/2 + cam.panX + q[0]*cam.zoom*persp,
+    rect.height/2 + cam.panY - q[1]*cam.zoom*persp,
+    q[2]
+  ];
+}
+
+function drawPoly(points, fill, stroke="#222", lw=1.2) {
+  const pts = points.map(project);
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let k=1; k<pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = lw;
+  ctx.stroke();
+}
+
+function drawLine3(a,b, stroke="#333", lw=1.5, dash=[]) {
+  const pa = project(a), pb = project(b);
+  ctx.save();
+  ctx.setLineDash(dash);
+  ctx.beginPath();
+  ctx.moveTo(pa[0], pa[1]);
+  ctx.lineTo(pb[0], pb[1]);
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = lw;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function cuboidFaces(x0, x1, z0, z1, sign) {
+  const depth = 0.75;
+  const y0 = 0;
+  const y1 = sign * depth;
+
+  const A=[x0,y0,z0], B=[x1,y0,z0], C=[x1,y0,z1], D=[x0,y0,z1];
+  const E=[x0,y1,z0], F=[x1,y1,z0], G=[x1,y1,z1], Hh=[x0,y1,z1];
+
+  return [
+    {p:[A,B,F,E], fill: sign>0 ? "rgba(120,170,210,.72)" : "rgba(220,140,120,.62)", key:(y0+y1)/2}, // bottom/side
+    {p:[D,C,G,Hh], fill: sign>0 ? "rgba(160,195,225,.78)" : "rgba(235,170,150,.68)", key:(y0+y1)/2+0.1}, // top
+    {p:[A,D,Hh,E], fill: sign>0 ? "rgba(95,145,190,.78)" : "rgba(190,100,90,.66)", key:(x0+x1)/2},
+    {p:[B,C,G,F], fill: sign>0 ? "rgba(95,145,190,.78)" : "rgba(190,100,90,.66)", key:(x0+x1)/2},
+    {p:[E,F,G,Hh], fill: sign>0 ? "rgba(135,180,215,.82)" : "rgba(225,130,115,.72)", key:y1}
+  ];
+}
+
+function draw3D() {
+  const rect = canvas.getBoundingClientRect();
+  ctx.clearRect(0,0,rect.width,rect.height);
+
+  const theta = foldDeg * Math.PI/180;
+  // For now, fold angle only changes the wall lean visually.
+  const wallTilt = Math.PI/2 - theta;
+  const pageW = W;
+  const pageD = 4.2;
+  const pageH = H+0.7;
+  const xLeft = -W/2, xRight = W/2;
+
+  const faces = [];
+
+  // floor backing sheet
+  faces.push({
+    p: [[xLeft,-pageD,0],[xRight,-pageD,0],[xRight,0,0],[xLeft,0,0]],
+    fill: "rgba(255,255,245,.88)", key: -10
+  });
+
+  // wall backing sheet, tilted according to fold angle
+  function wallPoint(x,z) {
+    // rotate wall away from perfect vertical at fold
+    return [x, Math.sin(wallTilt)*z, Math.cos(wallTilt)*z];
+  }
+  faces.push({
+    p: [wallPoint(xLeft,0), wallPoint(xRight,0), wallPoint(xRight,pageH), wallPoint(xLeft,pageH)],
+    fill: "rgba(255,255,250,.76)", key: 5
+  });
+
+  // cuboids, currently assumed meaningful near final 90-degree fold
+  for (let j=0; j<H; j++) {
+    for (let i=0; i<W; i++) {
+      const sign = cells[j][i];
+      if (!sign) continue;
+      const x0 = -W/2 + i;
+      const x1 = x0 + 1;
+      const z0 = j;
+      const z1 = j + 1;
+      faces.push(...cuboidFaces(x0,x1,z0,z1,sign));
+    }
+  }
+
+  // Painter's sort: average rotated z, approximate but good enough here.
+  faces.forEach(f => {
+    const avg = f.p.reduce((s,p) => s + rotatePoint(p, cam.rx, cam.ry)[2], 0) / f.p.length;
+    f.sortKey = avg;
+  });
+  faces.sort((a,b) => a.sortKey - b.sortKey);
+  faces.forEach(f => drawPoly(f.p, f.fill, "#222", 1));
+
+  // fold axis and axes hints
+  drawLine3([xLeft,0,0],[xRight,0,0], "#2874a6", 2.2, [8,5]);
+
+  ctx.fillStyle = "rgba(0,0,0,.55)";
+  ctx.font = "12px -apple-system, BlinkMacSystemFont, sans-serif";
+  ctx.fillText("blue = outward cells, red = inward cells", 10, rect.height - 12);
+}
+
+// Touch/mouse orbit controls
+let pointers = new Map();
+let lastSingle = null;
+let lastPinch = null;
+
+canvas.addEventListener("pointerdown", ev => {
+  canvas.setPointerCapture(ev.pointerId);
+  pointers.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+  if (pointers.size === 1) lastSingle = {x:ev.clientX, y:ev.clientY};
+  if (pointers.size === 2) lastPinch = pinchState();
+});
+
+canvas.addEventListener("pointermove", ev => {
+  if (!pointers.has(ev.pointerId)) return;
+  pointers.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+
+  if (pointers.size === 1 && lastSingle) {
+    const p = [...pointers.values()][0];
+    const dx = p.x - lastSingle.x;
+    const dy = p.y - lastSingle.y;
+    cam.ry += dx * 0.008;
+    cam.rx += dy * 0.008;
+    cam.rx = Math.max(-1.45, Math.min(1.45, cam.rx));
+    lastSingle = {x:p.x, y:p.y};
+    draw3D();
+  } else if (pointers.size === 2 && lastPinch) {
+    const now = pinchState();
+    cam.zoom *= now.dist / Math.max(1, lastPinch.dist);
+    cam.zoom = Math.max(25, Math.min(260, cam.zoom));
+    cam.panX += now.cx - lastPinch.cx;
+    cam.panY += now.cy - lastPinch.cy;
+    lastPinch = now;
+    draw3D();
+  }
+});
+
+canvas.addEventListener("pointerup", endPointer);
+canvas.addEventListener("pointercancel", endPointer);
+
+function endPointer(ev) {
+  pointers.delete(ev.pointerId);
+  lastSingle = pointers.size === 1 ? {...[...pointers.values()][0]} : null;
+  lastPinch = pointers.size === 2 ? pinchState() : null;
+}
+
+function pinchState() {
+  const ps = [...pointers.values()];
+  const a = ps[0], b = ps[1];
+  const dx = b.x-a.x, dy = b.y-a.y;
+  return {
+    dist: Math.hypot(dx,dy),
+    cx: (a.x+b.x)/2,
+    cy: (a.y+b.y)/2
+  };
+}
+
+document.getElementById("fold").addEventListener("input", ev => {
+  foldDeg = Number(ev.target.value);
+  document.getElementById("foldText").textContent = foldDeg + "°";
+  draw3D();
+});
+document.getElementById("demo1").addEventListener("click", constructiveDemoAlternating);
+document.getElementById("demo2").addEventListener("click", constructiveDemoTowerField);
+document.getElementById("clear").addEventListener("click", () => { clearCells(); render(); });
+
+window.addEventListener("resize", resize);
+constructiveDemoAlternating();
+resize();
+</script>
+</body>
+</html>

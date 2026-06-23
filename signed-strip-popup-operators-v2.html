@@ -1,0 +1,1171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Signed Strip Pop-up — Operators (Desktop Draft)</title>
+<style>
+  :root {
+    --bg:#f3eee2; --panel:#fffdf7; --ink:#17202a; --cut:#111; --fold:#2874a6;
+    --horiz:#2e86c1; --vert:#c0392b; --gutter:#d0c7b8;
+  }
+  html,body{margin:0;height:100%;overflow:hidden;font:14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}
+  #app{height:100%;display:grid;grid-template-rows:auto 1fr}
+header{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#242424;color:#fff;padding:7px 9px}
+  button,textarea,input,select{font:inherit}
+  button{padding:5px 8px;border-radius:8px;border:1px solid #999;background:white;color:#111}
+  button.small{padding:3px 7px;font-size:12px}
+  #panes{min-height:0;display:grid;grid-template-columns:minmax(46px,25fr) 8px minmax(46px,25fr) 8px minmax(46px,25fr) 8px minmax(46px,25fr)}
+  .pane{min-width:0;min-height:0;position:relative;background:var(--panel);overflow:hidden}
+  .gutter{background:var(--gutter);cursor:col-resize;touch-action:none}
+  .gutter::after{content:"";display:block;width:2px;height:44px;margin:calc(50vh - 72px) auto 0;background:rgba(0,0,0,.22);border-radius:4px}
+  .title{position:absolute;top:8px;left:9px;right:9px;z-index:5;display:flex;gap:6px;justify-content:space-between;align-items:center;pointer-events:none}
+  .titleText{padding:4px 7px;border-radius:8px;background:rgba(255,255,255,.86)}
+  .title button{pointer-events:auto}
+  .collapsed>*:not(.title){display:none!important}
+  #editorWrap,#opsWrap{height:100%;display:grid;grid-template-rows:auto auto 1fr auto;box-sizing:border-box;padding:42px 9px 8px;gap:8px}
+  #data{width:100%;height:100%;box-sizing:border-box;resize:none;border:1px solid #bbb;border-radius:8px;padding:8px;background:#fffefb;font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  #status,#opStatus{min-height:2.7em;color:#333;font-size:12px;overflow:auto}
+  #status.bad,#opStatus.bad{color:#a00000}
+  #pattern,#view3d{width:100%;height:100%;display:block;touch-action:none}
+  #view3d{background:linear-gradient(#fffdf7,#e8ddc8)}
+  .legend{position:absolute;left:9px;bottom:8px;z-index:5;padding:6px 8px;background:rgba(255,255,255,.86);border-radius:8px;font-size:12px}
+  .hint3d{position:absolute;left:9px;top:44px;z-index:5;padding:6px 8px;background:rgba(255,255,255,.82);border-radius:8px;font-size:12px;color:#5d584f}
+  .sw{display:inline-block;width:16px;height:0;border-top:3px solid;vertical-align:middle;margin-right:3px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .varList{overflow:auto;border:1px solid #bbb;border-radius:8px;background:#fffefb;padding:6px}
+  .varRow{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border:1px solid transparent;border-radius:10px;padding:7px 8px;cursor:pointer}
+  .varRow + .varRow{margin-top:4px}
+  .varRow:hover{background:rgba(40,116,166,.05)}
+  .varRow.selected{background:rgba(40,116,166,.10);border-color:rgba(40,116,166,.28)}
+  .varRow:last-child{border-bottom:0}
+  .varName{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:600}
+  .varMeta{font-size:12px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .varDesc{font-size:12px;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rowMain{min-width:0;display:grid;gap:2px}
+  .rowStats{font-size:11px;color:#6b6b6b;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .controls{display:flex;gap:6px;flex-wrap:wrap}
+  .pill{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:999px;background:#f0eadb;border:1px solid #d6ccb6;font-size:12px;color:#51483d}
+  .detailGrid{display:grid;grid-template-columns:1fr 1fr auto;gap:6px}
+  .detailGrid input{min-width:0;border:1px solid #bbb;border-radius:8px;padding:6px 8px;background:#fffefb}
+  .fieldGroup{display:grid;gap:4px}
+  .fieldGroup label{font-size:12px;color:#5d584f}
+  .detailHelp{font-size:12px;color:#5d584f}
+  .operatorCards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  .opCard{border:1px solid #ddd2bc;border-radius:10px;background:#fbf7ec;padding:7px 8px;font-size:12px}
+  .opCard code{font-size:12px}
+  .danger{border-color:#b94a48;color:#7d2724}
+  #viewCube{
+    position:absolute;
+    top:44px;
+    right:12px;
+    width:118px;
+    height:118px;
+    z-index:6;
+    background:rgba(255,255,255,.72);
+    border:1px solid rgba(0,0,0,.12);
+    border-radius:12px;
+    box-shadow:0 4px 16px rgba(0,0,0,.08);
+    backdrop-filter:blur(2px);
+  }
+  @media(max-width:950px){
+    #panes{grid-template-columns:1fr;grid-template-rows:minmax(46px,24fr) 8px minmax(46px,26fr) 8px minmax(46px,25fr) 8px minmax(46px,25fr)}
+    .gutter{cursor:row-resize}.gutter::after{width:44px;height:2px;margin:3px auto}
+    .operatorCards,.detailGrid{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+  <button type="button" id="resetPanes">Reset panes</button>
+</header>
+
+<main id="panes">
+  <section class="pane" id="paneData">
+    <div class="title"><div class="titleText">Variables</div><button type="button" class="small" data-collapse="paneData">hide</button></div>
+    <div id="editorWrap">
+      <div class="detailHelp">
+        Select a variable to show it immediately in the expression, 2D, and 3D panes.
+      </div>
+      <div class="controls">
+        <button type="button" id="addVar">+</button>
+        <button type="button" id="removeVar" class="danger">-</button>
+        <span class="pill"><code>v1..vN</code> aliases stay available in expressions</span>
+      </div>
+      <div class="varList" id="varList"></div>
+      <div id="opStatus"></div>
+    </div>
+  </section>
+
+  <div class="gutter" data-gutter="0"></div>
+
+  <section class="pane" id="paneOps">
+    <div class="title"><div class="titleText">Detail</div><button type="button" class="small" data-collapse="paneOps">hide</button></div>
+    <div id="opsWrap">
+      <div class="detailGrid">
+        <div class="fieldGroup">
+          <label for="varName">Name</label>
+          <input id="varName" placeholder="variable name" autocapitalize="off" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="fieldGroup">
+          <label for="varDesc">Description</label>
+          <input id="varDesc" placeholder="optional description" autocomplete="off" spellcheck="false">
+        </div>
+        <button type="button" id="apply">apply</button>
+      </div>
+      <div class="detailHelp">
+        <label for="data" style="display:block;margin-bottom:4px;color:#5d584f">Expression or JSON</label>
+        Enter either raw JSON for a strip design or an expression using variables and operators.
+      </div>
+      <textarea id="data" spellcheck="false"></textarea>
+      <div id="status"></div>
+      <div class="operatorCards">
+        <div class="opCard"><strong>Union / max</strong><br><code>max(a, b)</code> or <code>union(a, b)</code></div>
+        <div class="opCard"><strong>Intersection / min</strong><br><code>min(a, b)</code> or <code>intersection(a, b)</code></div>
+        <div class="opCard"><strong>Add</strong><br><code>add(a, b)</code> combines staircase heights and clamps to <code>H</code></div>
+        <div class="opCard"><strong>Subtract</strong><br><code>sub(a, b)</code> subtracts staircase heights and clamps at <code>0</code></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="gutter" data-gutter="1"></div>
+
+  <section class="pane" id="panePattern">
+    <div class="title"><div class="titleText">2D paper coordinates</div><button type="button" class="small" data-collapse="panePattern">hide</button></div>
+    <svg id="pattern"></svg>
+    <div class="legend"><span class="sw" style="border-color:var(--cut)"></span>strip cuts &nbsp;<span class="sw" style="border-color:var(--fold);border-top-style:dashed"></span>folds</div>
+  </section>
+
+  <div class="gutter" data-gutter="2"></div>
+
+  <section class="pane" id="pane3d">
+    <div class="title"><div class="titleText">90° alternating-segment mesh</div><button type="button" class="small" data-collapse="pane3d">hide</button></div>
+    <canvas id="view3d"></canvas>
+    <div class="hint3d">drag to rotate · mouse wheel to zoom · right-drag to pan · keys: F B L R T D · Esc resets</div>
+    <canvas id="viewCube" width="118" height="118" title="View cube: click faces for orthographic views, corners for isometric views"></canvas>
+    <div class="legend">paper preview</div>
+  </section>
+</main>
+</div>
+
+<script>
+"use strict";
+
+/*
+  Operator version.
+
+  Data model:
+    { widths:[...], strips:[[l1,l2,...], ...] }
+
+  Strip endpoint invariant:
+    horizontal sum l1+l3+... = H
+    vertical   sum l2+l4+... = H
+
+  Operators:
+    A strip corresponds to a monotone staircase function y(u), u in [0,H].
+    u is distance travelled horizontally from the lower edge, equivalently u=H-z.
+    max/min/add/sub operate on this step function pointwise and convert back
+    to alternating lengths.
+
+  The conversion is deliberately simple and hackable. It keeps the representation
+  valid, but it does not yet reason about self-intersection or physical cut conflicts.
+*/
+
+const examples = {
+  folded: {
+    widths: [1],
+    strips: [[1,1]]
+  },
+  step: {
+    widths: [1.2, 1.6, 1.2],
+    strips: [
+      [2,2],
+      [0.85,0.9,1.15,1.1],
+      [2,2]
+    ]
+  },
+  richA: {
+    widths: [0.8,1,1,1,1,0.8],
+    strips: [
+      [2,2],
+      [1.3,0.5,0.7,1.5],
+      [0.9,1.1,1.1,0.9],
+      [0.55,1.35,1.45,0.65],
+      [1.1,0.8,0.9,1.2],
+      [2,2]
+    ]
+  },
+  richB: {
+    widths: [0.7,0.9,1.0,1.0,0.9,0.7],
+    strips: [
+      [2,2],
+      [0.8,0.6,0.55,0.7,0.65,0.7],
+      [0.55,1.0,0.95,0.45,0.5,0.55],
+      [0.55,0.45,0.95,1.0,0.5,0.55],
+      [0.8,0.7,0.55,0.6,0.65,0.7],
+      [2,2]
+    ]
+  },
+  arch: {
+    widths: [0.8,0.9,1.0,0.9,0.8],
+    strips: [
+      [2,2],
+      [1.35,0.65,0.65,1.35],
+      [0.55,1.45,0.9,0.55,0.55,0],
+      [1.35,0.65,0.65,1.35],
+      [2,2]
+    ]
+  },
+  terrace: {
+    widths: [0.8,0.8,0.9,1.0,0.9,0.8,0.8],
+    strips: [
+      [2,2],
+      [1.5,0.5,0.5,1.5],
+      [1.15,0.85,0.85,1.15],
+      [0.75,1.25,1.25,0.75],
+      [1.15,0.85,0.85,1.15],
+      [1.5,0.5,0.5,1.5],
+      [2,2]
+    ]
+  },
+  saw: {
+    widths: [0.7,0.8,0.8,0.8,0.8,0.7],
+    strips: [
+      [2,2],
+      [1.5,0.5,0.5,0.5,0,1],
+      [1.0,0.5,0.4,0.6,0.6,0.9],
+      [0.6,0.9,0.4,0.6,1.0,0.5],
+      [0.2,1.1,0.6,0.4,1.2,0.5],
+      [2,2]
+    ]
+  },
+  gate: {
+    widths: [0.8,1.0,0.9,1.0,0.8],
+    strips: [
+      [2,2],
+      [1.4,0.6,0.6,1.4],
+      [0.4,1.3,1.2,0.2,0.4,0.5],
+      [1.4,0.6,0.6,1.4],
+      [2,2]
+    ]
+  },
+  twin: {
+    widths: [0.75,0.9,0.65,0.9,0.75],
+    strips: [
+      [2,2],
+      [1.35,0.65,0.65,1.35],
+      [1.9,0.1,0.1,1.9],
+      [1.35,0.65,0.65,1.35],
+      [2,2]
+    ]
+  },
+  nested: {
+    widths: [0.8,0.9,1.1,0.9,0.8],
+    strips: [
+      [2,2],
+      [1.45,0.55,0.55,1.45],
+      [0.95,0.35,0.35,0.35,0.70,1.30],
+      [1.45,0.55,0.55,1.45],
+      [2,2]
+    ]
+  },
+  skyline: {
+    widths: [0.55,0.65,0.7,0.8,0.7,0.65,0.55],
+    strips: [
+      [2,2],
+      [1.7,0.3,0.3,1.7],
+      [1.3,0.7,0.7,1.3],
+      [0.65,1.35,1.35,0.65],
+      [1.1,0.9,0.9,1.1],
+      [1.45,0.55,0.55,1.45],
+      [2,2]
+    ]
+  },
+  bridge: {
+    widths: [0.7,0.9,0.9,0.9,0.7],
+    strips: [
+      [2,2],
+      [1.55,0.45,0.45,1.55],
+      [0.7,0.55,0.5,0.3,0.8,1.15],
+      [1.55,0.45,0.45,1.55],
+      [2,2]
+    ]
+  },
+  buttress: {
+    widths: [0.75,0.75,0.85,0.95,0.85,0.75,0.75],
+    strips: [
+      [2,2],
+      [1.65,0.35,0.35,1.65],
+      [1.25,0.75,0.75,1.25],
+      [0.5,1.5,1.5,0.5],
+      [1.25,0.75,0.75,1.25],
+      [1.65,0.35,0.35,1.65],
+      [2,2]
+    ]
+  }
+};
+
+function makeVar(name, description, source){
+  return {name, description, source, value:evaluateSource(source)};
+}
+
+let vars = [
+  makeVar("folded", "simplest folded page", pretty(examples.folded)),
+  makeVar("step", "single central step cuboid", pretty(examples.step)),
+  makeVar("arch", "arched central opening", pretty(examples.arch)),
+  makeVar("terrace", "stepped terrace profile", pretty(examples.terrace)),
+  makeVar("saw", "asymmetric sawtooth profile", pretty(examples.saw)),
+  makeVar("gate", "portal-like inner opening", pretty(examples.gate)),
+  makeVar("twin", "tall paired slabs", pretty(examples.twin)),
+  makeVar("nested", "nested inward-outward steps", pretty(examples.nested)),
+  makeVar("skyline", "broad skyline silhouette", pretty(examples.skyline)),
+  makeVar("bridge", "bridged middle passage", pretty(examples.bridge)),
+  makeVar("buttress", "wide buttressed massing", pretty(examples.buttress))
+];
+let selected = 0;
+function pretty(obj){return JSON.stringify(obj,null,2)}
+function sum(a){return a.reduce((x,y)=>x+y,0)}
+function clone(x){return structuredClone(x)}
+function hsum(strip){let s=0;for(let j=0;j<strip.length;j+=2)s+=strip[j];return s}
+function vsum(strip){let s=0;for(let j=1;j<strip.length;j+=2)s+=strip[j];return s}
+function paperParams(d=currentDesign()){return {W:sum(d.widths), H:hsum(d.strips[0]), twoH:2*hsum(d.strips[0])}}
+function currentDesign(){return vars[selected].value}
+const defaultCam = {rx:0.52, ry:1.05, rz:0.0, zoom:122, panX:0, panY:8};
+let cam = {...defaultCam};
+let paneWeights = [20,22,26,32];
+let hover3D = {active:false, x:0, y:0, mode:"rotate"};
+let view3DHotkeysActive = false;
+
+const panes = document.getElementById("panes");
+const dataEl = document.getElementById("data");
+const varNameEl = document.getElementById("varName");
+const varDescEl = document.getElementById("varDesc");
+const statusEl = document.getElementById("status");
+const opStatusEl = document.getElementById("opStatus");
+const varListEl = document.getElementById("varList");
+const pattern = document.getElementById("pattern");
+const canvas = document.getElementById("view3d");
+const ctx = canvas.getContext("2d");
+const cubeCanvas = document.getElementById("viewCube");
+const cubeCtx = cubeCanvas.getContext("2d");
+const pane3dEl = document.getElementById("pane3d");
+let viewCubeTargets = [];
+
+function validate(d){
+  if(!d || !Array.isArray(d.widths)||!Array.isArray(d.strips)) return "Expected { widths:[...], strips:[[...], ...] }";
+  if(d.widths.length!==d.strips.length) return "widths.length must equal strips.length.";
+  if(!d.widths.every(x=>Number.isFinite(x)&&x>0)) return "Every width must be positive.";
+  if(d.strips.length===0) return "Need at least one strip.";
+  const H=hsum(d.strips[0]), V=vsum(d.strips[0]);
+  if(H<=0 || V<=0) return "First strip needs positive horizontal and vertical sums.";
+  if(Math.abs(H-V)>1e-6) return `First strip endpoint mismatch: horizontal ${H.toFixed(3)}, vertical ${V.toFixed(3)}.`;
+  for(let i=0;i<d.strips.length;i++){
+    const s=d.strips[i];
+    if(!Array.isArray(s)||s.length<2) return `Strip ${i} needs at least [horizontal, vertical].`;
+    if(!s.every(x=>Number.isFinite(x)&&x>=0)) return `Strip ${i} has a non-number or negative length.`;
+    const hs=hsum(s), vs=vsum(s);
+    if(Math.abs(hs-H)>1e-6 || Math.abs(vs-H)>1e-6) return `Strip ${i} endpoint invariants fail: horizontal ${hs.toFixed(3)}, vertical ${vs.toFixed(3)}, expected both ${H.toFixed(3)}.`;
+  }
+  return "";
+}
+
+function compatible(a,b){
+  const ea=validate(a), eb=validate(b);
+  if(ea) throw Error("A invalid: "+ea);
+  if(eb) throw Error("B invalid: "+eb);
+  if(a.widths.length!==b.widths.length) throw Error("Operator requires equal number of strips.");
+  for(let i=0;i<a.widths.length;i++){
+    if(Math.abs(a.widths[i]-b.widths[i])>1e-6) throw Error("Operator requires equal strip widths.");
+  }
+  if(Math.abs(hsum(a.strips[0])-hsum(b.strips[0]))>1e-6) throw Error("Operator requires equal H.");
+  return hsum(a.strips[0]);
+}
+
+function stripBreakpoints(strip){
+  // Returns [{u, y}], including start and each horizontal endpoint / vertical jump endpoint.
+  let u=0, y=0;
+  const pts=[{u,y}];
+  for(let j=0;j<strip.length;j++){
+    const L=strip[j];
+    if(j%2===0) u += L; else y += L;
+    pts.push({u,y});
+  }
+  return pts;
+}
+
+function yAt(strip,u){
+  let curU=0, curY=0;
+  for(let j=0;j<strip.length;j++){
+    const L=strip[j];
+    if(j%2===0){
+      const nextU=curU+L;
+      if(u <= nextU + 1e-9) return curY;
+      curU=nextU;
+    }else{
+      curY += L;
+    }
+  }
+  return curY;
+}
+
+function profileToStrip(us, ys, H){
+  // Convert right-continuous monotone step samples into alternating horizontal/vertical lengths.
+  // us sorted, ys value on interval after each u.
+  const out=[];
+  let u0=0, y0=0;
+
+  for(let k=1;k<us.length;k++){
+    const u1=us[k];
+    const horiz=Math.max(0,u1-u0);
+    out.push(clean(horiz));
+    const y1=ys[k]; // value at u1 after jumps at u1
+    const vert=Math.max(0,y1-y0);
+    out.push(clean(vert));
+    u0=u1; y0=y1;
+  }
+
+  if(u0 < H-1e-9){
+    out.push(clean(H-u0));
+    u0=H;
+  }
+  if(y0 < H-1e-9){
+    out.push(clean(H-y0));
+    y0=H;
+  }
+
+  // Remove trailing zeros, but keep at least [H,H]-like structure.
+  while(out.length>2 && Math.abs(out[out.length-1])<1e-12) out.pop();
+  return out;
+}
+
+function clean(x){return Math.abs(x)<1e-10 ? 0 : Number(x.toFixed(10))}
+
+function opDesign(a,b,opName){
+  const H=compatible(a,b);
+  const out={widths:clone(a.widths), strips:[]};
+
+  for(let i=0;i<a.strips.length;i++){
+    const sa=a.strips[i], sb=b.strips[i];
+
+    // All u coordinates where either staircase may change horizontally/vertically.
+    const set=new Set([0,H]);
+    for(const p of stripBreakpoints(sa)) set.add(clean(p.u));
+    for(const p of stripBreakpoints(sb)) set.add(clean(p.u));
+    const us=[...set].filter(x=>x>=-1e-9 && x<=H+1e-9).sort((x,y)=>x-y);
+
+    const ys=[0];
+    for(let k=1;k<us.length;k++){
+      const u=us[k];
+      const ya=yAt(sa,u), yb=yAt(sb,u);
+      let y;
+      if(opName==="max") y=Math.max(ya,yb);
+      else if(opName==="min") y=Math.min(ya,yb);
+      else if(opName==="add") y=Math.min(H, ya+yb);
+      else if(opName==="sub") y=Math.max(0, ya-yb);
+      else throw Error("Unknown op "+opName);
+      y=Math.max(0,Math.min(H,y));
+      // maintain monotonicity
+      y=Math.max(ys[ys.length-1],y);
+      ys.push(clean(y));
+    }
+
+    out.strips.push(profileToStrip(us,ys,H));
+  }
+
+  const err=validate(out);
+  if(err) throw Error("Operator produced invalid result: "+err);
+  return out;
+}
+
+function max(a,b){return opDesign(a,b,"max")}
+function min(a,b){return opDesign(a,b,"min")}
+function add(a,b){return opDesign(a,b,"add")}
+function sub(a,b){return opDesign(a,b,"sub")}
+function intersection(a,b){return min(a,b)}
+function union(a,b){return max(a,b)}
+
+function nextVarName(){
+  let i=1;
+  while(vars.some(v=>v.name===`v${i}`)) i++;
+  return `v${i}`;
+}
+
+function validateVarName(name, index=selected){
+  if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return "Variable name must be a valid JavaScript identifier.";
+  const clash=vars.findIndex((v,i)=>i!==index && v.name===name);
+  if(clash!==-1) return `Variable name '${name}' is already in use.`;
+  return "";
+}
+
+function buildEvalContext(){
+  const ctx={max,min,add,sub,intersection,union,clone};
+  for(let i=0;i<vars.length;i++) ctx[`v${i+1}`]=vars[i].value;
+  for(const v of vars) ctx[v.name]=v.value;
+  return ctx;
+}
+
+function evaluateSource(source){
+  const trimmed=String(source).trim();
+  if(!trimmed) throw Error("Expression is empty.");
+  if(trimmed.startsWith("{") || trimmed.startsWith("[")){
+    const obj=JSON.parse(trimmed);
+    const err=validate(obj);
+    if(err) throw Error(err);
+    return obj;
+  }
+  const ctx=buildEvalContext();
+  const names=Object.keys(ctx);
+  const values=Object.values(ctx);
+  const f=Function(...names,'"use strict"; return ('+trimmed+');');
+  const result=f(...values);
+  const err=validate(result);
+  if(err) throw Error(err);
+  return result;
+}
+
+function addVar(){
+  vars.push(makeVar(nextVarName(),"new variable",pretty(examples.step)));
+  selected=vars.length-1;
+  refreshUI();
+  renderAll();
+}
+
+function removeVar(){
+  if(vars.length<=1){
+    setOpStatus("Keep at least one variable in the list.",true);
+    return;
+  }
+  vars.splice(selected,1);
+  selected=Math.min(selected,vars.length-1);
+  refreshUI();
+  renderAll();
+}
+
+function setOpStatus(msg,bad=false){
+  opStatusEl.className=bad?"bad":"";
+  opStatusEl.textContent=msg;
+}
+
+function showStatus(msg,bad=false){
+  statusEl.className=bad?"bad":"";
+  statusEl.textContent=msg;
+}
+
+function refreshUI(){
+  const current=vars[selected];
+  varNameEl.value=current.name;
+  varDescEl.value=current.description || "";
+  dataEl.value=current.source;
+
+  varListEl.innerHTML="";
+  for(let i=0;i<vars.length;i++){
+    const v=vars[i];
+    const row=document.createElement("div");
+    row.className=`varRow${i===selected?" selected":""}`;
+    const err=validate(v.value);
+    const dims=err ? "invalid" : `W=${paperParams(v.value).W.toFixed(2)} H=${paperParams(v.value).H.toFixed(2)}`;
+    row.innerHTML=`<div class="rowMain">
+      <div class="varName">${escapeHtml(v.name)}</div>
+      <div class="varDesc">${escapeHtml(v.description || "no description")}</div>
+      <div class="rowStats">${dims} · ${v.source.trim().startsWith("{") ? "json" : "expression"}</div>
+    </div>
+    <div class="varMeta">${i===selected?"selected":`v${i+1}`}</div>`;
+    row.addEventListener("click",()=>{
+      selected=i; refreshUI(); renderAll();
+    });
+    varListEl.appendChild(row);
+  }
+  setOpStatus(`Available aliases: ${vars.map((v,i)=>`v${i+1}=${v.name}`).join(" · ")}`);
+}
+
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+
+function applyEditor(){
+  const newName=varNameEl.value.trim();
+  const nameErr=validateVarName(newName);
+  if(nameErr){showStatus(nameErr,true);return}
+  try{
+    const source=dataEl.value;
+    const value=evaluateSource(source);
+    vars[selected]={
+      name:newName,
+      description:varDescEl.value.trim(),
+      source,
+      value
+    };
+    refreshUI();
+    renderAll();
+  }catch(e){
+    showStatus(e.message,true);
+  }
+}
+
+function renderAll(){
+  const err=validate(currentDesign());
+  if(err){showStatus(err,true);return}
+  const {W,H}=paperParams();
+  showStatus(`Showing ${vars[selected].name}. OK. W=${W.toFixed(3)}, H=${H.toFixed(3)}. Start edge y=-H maps to z=H.`);
+  drawPattern();
+  draw3D();
+}
+
+// 2D pattern
+function drawPattern(){
+  const d=currentDesign(), {W,H,twoH}=paperParams(d);
+  const r=pattern.getBoundingClientRect();
+  const width=r.width,height=r.height;
+  pattern.setAttribute("viewBox",`0 0 ${width} ${height}`);
+  pattern.innerHTML="";
+  const margin=42;
+  const s=Math.min((width-2*margin)/W,(height-2*margin)/twoH);
+  const ox=(width-W*s)/2, oy=height/2;
+
+  function el(n){return document.createElementNS("http://www.w3.org/2000/svg",n)}
+  function line(x1,y1,x2,y2,stroke,dash="",lw=1.4){const e=el("line");e.setAttribute("x1",x1);e.setAttribute("y1",y1);e.setAttribute("x2",x2);e.setAttribute("y2",y2);e.setAttribute("stroke",stroke);e.setAttribute("stroke-width",lw);e.setAttribute("stroke-linecap","round");if(dash)e.setAttribute("stroke-dasharray",dash);pattern.appendChild(e)}
+  function rect(x,y,w,h,fill,stroke="#ddd",lw=1){const e=el("rect");e.setAttribute("x",x);e.setAttribute("y",y);e.setAttribute("width",w);e.setAttribute("height",h);e.setAttribute("fill",fill);e.setAttribute("stroke",stroke);e.setAttribute("stroke-width",lw);pattern.appendChild(e)}
+  function text(x,y,t){const e=el("text");e.setAttribute("x",x);e.setAttribute("y",y);e.setAttribute("font-size","11");e.setAttribute("fill","#555");e.textContent=t;pattern.appendChild(e)}
+
+  const top=oy-H*s,bottom=oy+H*s;
+  rect(ox,top,W*s,H*s,"rgba(255,255,250,.95)","#bbb",1);
+  rect(ox,oy,W*s,H*s,"rgba(245,239,225,.95)","#bbb",1);
+  rect(ox,top,W*s,twoH*s,"transparent","#888",1.5);
+  line(ox,oy,ox+W*s,oy,"#2874a6","8 5",2.2);
+  text(ox+4,oy-8,"main fold y=0");
+  text(ox+W*s+6,top+4,"y=H");
+  text(ox+W*s+6,bottom,"y=-H → z=H");
+
+  let x=ox;
+  for(let i=0;i<d.widths.length;i++){
+    const stripW=d.widths[i]*s;
+    const strip=d.strips[i];
+    let t=0;
+    for(let j=0;j<strip.length;j++){
+      const t0=t,t1=t+strip[j]; t=t1;
+      const flatY0=-H+t0, flatY1=-H+t1;
+      const screenY1=oy-flatY1*s;
+      const h=(flatY1-flatY0)*s;
+      const horiz=(j%2)===0;
+      rect(x,screenY1,stripW,h,horiz?"rgba(46,134,193,.13)":"rgba(192,57,43,.11)","none",0);
+      if(j<strip.length-1){
+        const yy=oy-(-H+t1)*s;
+        line(x,yy,x+stripW,yy,"#2874a6","6 5",1.35);
+      }
+    }
+    line(x,top,x,bottom,"#111","",i===0?2.0:1.3);
+    x+=stripW;
+  }
+  line(x,top,x,bottom,"#111","",2.0);
+  text(ox,bottom+16,"Traversal starts at flat y=-H. In 3D that is z=H.");
+}
+
+// 3D
+function stripXPositions(d=currentDesign()){
+  const xs=[0]; for(const w of d.widths) xs.push(xs[xs.length-1]+w); return xs;
+}
+
+function buildQuads(){
+  const d=currentDesign(), {W,H}=paperParams(d), xs=stripXPositions(d);
+  const quads=[];
+
+  for(let i=0;i<d.strips.length;i++){
+    const x0=xs[i],x1=xs[i+1];
+    let y=0,z=H;
+    for(let j=0;j<d.strips[i].length;j++){
+      const L=d.strips[i][j];
+      if(j%2===0){
+        const z2=z-L;
+        if(L>1e-9) quads.push({pts:[[x0,y,z],[x1,y,z],[x1,y,z2],[x0,y,z2]],kind:"strip",axis:"horizontal"});
+        z=z2;
+      }else{
+        const y2=y+L;
+        if(L>1e-9) quads.push({pts:[[x0,y,z],[x1,y,z],[x1,y2,z],[x0,y2,z]],kind:"strip",axis:"vertical"});
+        y=y2;
+      }
+    }
+  }
+  return quads;
+}
+
+function rotatePoint(p,rx,ry,rz=cam.rz){
+  let [x,y,z]=p; const {W,H}=paperParams();
+  x-=W/2; y-=H/3; z-=H/3;
+  let c=Math.cos(rx),s=Math.sin(rx);
+  let y1=y*c-z*s,z1=y*s+z*c; y=y1; z=z1;
+  c=Math.cos(ry); s=Math.sin(ry);
+  let x1=x*c+z*s,z2=-x*s+z*c; x=x1; z=z2;
+  c=Math.cos(rz); s=Math.sin(rz);
+  let x2=x*c-y*s,y2=x*s+y*c; x=x2; y=y2;
+  return [x,y,z];
+}
+function project(p){
+  const r=canvas.getBoundingClientRect(), q=rotatePoint(p,cam.rx,cam.ry);
+  const persp=750/(750+q[2]*cam.zoom*0.035);
+  return [r.width/2+cam.panX+q[0]*cam.zoom*persp, r.height/2+cam.panY-q[1]*cam.zoom*persp, q[2]];
+}
+function drawPoly(pts,fill,stroke="#222",lw=1.05){
+  const ps=pts.map(project); ctx.beginPath(); ctx.moveTo(ps[0][0],ps[0][1]);
+  for(let i=1;i<ps.length;i++) ctx.lineTo(ps[i][0],ps[i][1]);
+  ctx.closePath(); ctx.fillStyle=fill; ctx.fill(); ctx.strokeStyle=stroke; ctx.lineWidth=lw; ctx.stroke();
+}
+function drawLine3(a,b,stroke="#333",lw=1.4,dash=[]){
+  const pa=project(a),pb=project(b); ctx.save(); ctx.setLineDash(dash); ctx.beginPath(); ctx.moveTo(pa[0],pa[1]); ctx.lineTo(pb[0],pb[1]); ctx.strokeStyle=stroke; ctx.lineWidth=lw; ctx.stroke(); ctx.restore();
+}
+function vecSub(a,b){return [a[0]-b[0],a[1]-b[1],a[2]-b[2]]}
+function vecCross(a,b){return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]}
+function vecDot(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]}
+function vecNorm(a){const m=Math.hypot(a[0],a[1],a[2])||1; return [a[0]/m,a[1]/m,a[2]/m]}
+function faceFill(q){
+  const pts=q.pts.map(p=>rotatePoint(p,cam.rx,cam.ry));
+  const n=vecNorm(vecCross(vecSub(pts[1],pts[0]),vecSub(pts[2],pts[0])));
+  const light=vecNorm([-0.45,0.88,0.3]);
+  const intensity=0.76 + 0.18*Math.max(0,vecDot(n,light)) + 0.05*Math.abs(n[1]);
+  const tone=Math.max(224,Math.min(252,Math.round(255*intensity)));
+  return `rgb(${tone},${tone},${Math.max(220,tone-2)})`;
+}
+function triangleFill(rotPts){
+  const n=vecNorm(vecCross(vecSub(rotPts[1],rotPts[0]),vecSub(rotPts[2],rotPts[0])));
+  const light=vecNorm([-0.45,0.88,0.3]);
+  const intensity=0.74 + 0.2*Math.abs(vecDot(n,light)) + 0.04*Math.abs(n[1]);
+  const tone=Math.max(223,Math.min(252,Math.round(255*intensity)));
+  return `rgb(${tone},${tone},${Math.max(220,tone-2)})`;
+}
+function drawTriangle(projected,fill){
+  ctx.beginPath();
+  ctx.moveTo(projected[0][0],projected[0][1]);
+  ctx.lineTo(projected[1][0],projected[1][1]);
+  ctx.lineTo(projected[2][0],projected[2][1]);
+  ctx.closePath();
+  ctx.fillStyle=fill;
+  ctx.fill();
+}
+function drawProjectedPolyline(points, stroke="rgba(80,80,80,.82)", lw=1){
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], points[0][1]);
+  for(let i=1;i<points.length;i++) ctx.lineTo(points[i][0], points[i][1]);
+  ctx.closePath();
+  ctx.strokeStyle=stroke;
+  ctx.lineWidth=lw;
+  ctx.stroke();
+}
+function draw3D(){
+  const r=canvas.getBoundingClientRect(); ctx.clearRect(0,0,r.width,r.height);
+  const quads=buildQuads();
+  const tris=[];
+  const outlines=[];
+  for(const q of quads){
+    const rot=q.pts.map(p=>rotatePoint(p,cam.rx,cam.ry));
+    tris.push({rot:[rot[0],rot[1],rot[2]]});
+    tris.push({rot:[rot[0],rot[2],rot[3]]});
+    outlines.push({rot, edge:q.kind.includes("Sheet")?0.9:1.0, depth:rot.reduce((acc,p)=>acc+p[2],0)/4});
+  }
+  for(const t of tris){
+    t.depth=t.rot.reduce((acc,p)=>acc+p[2],0)/3;
+    t.projected=t.rot.map(q=>{
+      const persp=750/(750+q[2]*cam.zoom*0.035);
+      return [r.width/2+cam.panX+q[0]*cam.zoom*persp, r.height/2+cam.panY-q[1]*cam.zoom*persp, q[2]];
+    });
+  }
+  tris.sort((a,b)=>a.depth-b.depth);
+  for(const t of tris){
+    drawTriangle(t.projected,triangleFill(t.rot));
+  }
+  outlines.sort((a,b)=>a.depth-b.depth);
+  for(const q of outlines){
+    const projected=q.rot.map(p=>{
+      const persp=750/(750+p[2]*cam.zoom*0.035);
+      return [r.width/2+cam.panX+p[0]*cam.zoom*persp, r.height/2+cam.panY-p[1]*cam.zoom*persp, p[2]];
+    });
+    drawProjectedPolyline(projected,"rgba(80,80,80,.78)",q.edge);
+  }
+  const {W,H}=paperParams();
+  drawLine3([0,0,0],[W,0,0],"rgba(120,120,120,.7)",1.3,[8,5]);
+  drawLine3([0,0,H],[W,0,H],"rgba(120,120,120,.55)",1.1,[5,5]);
+  drawRotationHalo();
+  ctx.fillStyle="rgba(0,0,0,.62)"; ctx.font="12px -apple-system,BlinkMacSystemFont,sans-serif";
+  ctx.fillText("Paper surface preview. Operators combine staircase profiles.",10,r.height-12);
+  drawViewCube();
+}
+
+function drawRotationHalo(){
+  if(!hover3D.active || pointers.size>0) return;
+  const m=screenMetrics();
+  const dist=Math.hypot(hover3D.x-m.cx, hover3D.y-m.cy);
+  const inOrbitBand=dist>=m.rollStart;
+  const outerRadius=Math.min(m.outer, Math.min(canvas.getBoundingClientRect().width, canvas.getBoundingClientRect().height)*0.46);
+  const rollRadius=Math.min(m.rollStart, outerRadius-16);
+
+  ctx.save();
+  ctx.lineWidth=1.5;
+  ctx.setLineDash([6,6]);
+  ctx.strokeStyle=inOrbitBand ? "rgba(40,116,166,.75)" : "rgba(23,32,42,.18)";
+  ctx.beginPath();
+  ctx.arc(m.cx,m.cy,rollRadius,0,Math.PI*2);
+  ctx.stroke();
+
+  ctx.setLineDash([3,7]);
+  ctx.strokeStyle=inOrbitBand ? "rgba(192,57,43,.55)" : "rgba(23,32,42,.10)";
+  ctx.beginPath();
+  ctx.arc(m.cx,m.cy,Math.max(10, rollRadius-18),0,Math.PI*2);
+  ctx.stroke();
+
+  if(inOrbitBand){
+    const angle=Math.atan2(hover3D.y-m.cy, hover3D.x-m.cx);
+    ctx.setLineDash([]);
+    ctx.fillStyle="rgba(40,116,166,.14)";
+    ctx.beginPath();
+    ctx.arc(m.cx,m.cy,outerRadius,angle-0.22,angle+0.22);
+    ctx.arc(m.cx,m.cy,rollRadius,angle+0.22,angle-0.22,true);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle="rgba(40,116,166,.85)";
+    ctx.font="12px -apple-system,BlinkMacSystemFont,sans-serif";
+    ctx.fillText("roll", m.cx+12, m.cy-rollRadius-8);
+  }
+  ctx.restore();
+}
+
+function cubeRotatePoint(p, rx=cam.rx, ry=cam.ry, rz=cam.rz){
+  let [x,y,z]=p;
+  let c=Math.cos(rx),s=Math.sin(rx);
+  let y1=y*c-z*s,z1=y*s+z*c; y=y1; z=z1;
+  c=Math.cos(ry); s=Math.sin(ry);
+  let x1=x*c+z*s,z2=-x*s+z*c; x=x1; z=z2;
+  c=Math.cos(rz); s=Math.sin(rz);
+  let x2=x*c-y*s,y2=x*s+y*c; x=x2; y=y2;
+  return [x,y,z];
+}
+
+function drawViewCube(){
+  cubeCtx.clearRect(0,0,cubeCanvas.width,cubeCanvas.height);
+  const cx=cubeCanvas.width/2, cy=cubeCanvas.height/2+4, scale=28;
+  const verts=[
+    [-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],
+    [-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]
+  ];
+  const projected=verts.map(v=>{
+    const r=cubeRotatePoint(v);
+    return {p:[cx+r[0]*scale, cy-r[1]*scale], z:r[2], raw:v};
+  });
+  const faces=[
+    {name:"front", label:"F", idx:[4,5,6,7], view:{rx:0, ry:0, rz:0}},
+    {name:"back", label:"B", idx:[0,1,2,3], view:{rx:0, ry:Math.PI, rz:0}},
+    {name:"right", label:"R", idx:[1,5,6,2], view:{rx:0, ry:Math.PI/2, rz:0}},
+    {name:"left", label:"L", idx:[0,4,7,3], view:{rx:0, ry:-Math.PI/2, rz:0}},
+    {name:"top", label:"T", idx:[3,2,6,7], view:{rx:-Math.PI/2, ry:0, rz:0}},
+    {name:"bottom", label:"D", idx:[0,1,5,4], view:{rx:Math.PI/2, ry:0, rz:0}}
+  ];
+  viewCubeTargets=[];
+  const light=vecNorm([-0.35,0.82,0.44]);
+  faces
+    .map(face=>{
+      const rp=face.idx.map(i=>cubeRotatePoint(verts[i]));
+      const normal=vecNorm(vecCross(vecSub(rp[1],rp[0]),vecSub(rp[2],rp[0])));
+      return {...face, normal, avgZ:rp.reduce((s,p)=>s+p[2],0)/4};
+    })
+    .filter(face=>face.normal[2] > -0.05)
+    .sort((a,b)=>a.avgZ-b.avgZ)
+    .forEach(face=>{
+      const poly=face.idx.map(i=>projected[i].p);
+      const intensity=0.75 + 0.16*Math.max(0,vecDot(face.normal,light));
+      const tone=Math.round(255*intensity);
+      cubeCtx.beginPath();
+      cubeCtx.moveTo(poly[0][0],poly[0][1]);
+      for(let i=1;i<poly.length;i++) cubeCtx.lineTo(poly[i][0],poly[i][1]);
+      cubeCtx.closePath();
+      cubeCtx.fillStyle=`rgb(${tone},${tone},${Math.max(226,tone-3)})`;
+      cubeCtx.fill();
+      cubeCtx.strokeStyle="rgba(70,70,70,.65)";
+      cubeCtx.lineWidth=1.1;
+      cubeCtx.stroke();
+      const mx=poly.reduce((s,p)=>s+p[0],0)/poly.length;
+      const my=poly.reduce((s,p)=>s+p[1],0)/poly.length;
+      cubeCtx.fillStyle="rgba(55,55,55,.82)";
+      cubeCtx.font="12px -apple-system,BlinkMacSystemFont,sans-serif";
+      cubeCtx.textAlign="center";
+      cubeCtx.textBaseline="middle";
+      cubeCtx.fillText(face.label,mx,my);
+      viewCubeTargets.push({type:"face", poly, view:face.view});
+    });
+
+  const visibleVerts=projected
+    .map((v,i)=>({i,...v}))
+    .sort((a,b)=>a.z-b.z)
+    .slice(-4);
+  for(const v of visibleVerts){
+    cubeCtx.beginPath();
+    cubeCtx.arc(v.p[0],v.p[1],3.3,0,Math.PI*2);
+    cubeCtx.fillStyle="rgba(40,116,166,.9)";
+    cubeCtx.fill();
+    cubeCtx.strokeStyle="rgba(255,255,255,.9)";
+    cubeCtx.lineWidth=1;
+    cubeCtx.stroke();
+    const [sx,sy,sz]=v.raw;
+    viewCubeTargets.push({
+      type:"corner",
+      x:v.p[0], y:v.p[1], r:9,
+      view:{rx:sy>0?-0.68:0.68, ry:sx>0?0.82:-0.82, rz:sz>0?0.0:Math.PI}
+    });
+  }
+}
+
+function pointInPoly(x,y,poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i][0], yi=poly[i][1], xj=poly[j][0], yj=poly[j][1];
+    const intersect=((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi+1e-12)+xi);
+    if(intersect) inside=!inside;
+  }
+  return inside;
+}
+
+function setCameraView(view){
+  cam={...cam, ...view};
+  draw3D();
+}
+
+function resetCameraView(){
+  setCameraView({...defaultCam});
+}
+
+function namedView(key){
+  const k=String(key).toUpperCase();
+  if(k==="F") return {rx:0, ry:0, rz:0, panX:0, panY:8, zoom:122};
+  if(k==="B") return {rx:0, ry:Math.PI, rz:0, panX:0, panY:8, zoom:122};
+  if(k==="R") return {rx:0, ry:Math.PI/2, rz:0, panX:0, panY:8, zoom:122};
+  if(k==="L") return {rx:0, ry:-Math.PI/2, rz:0, panX:0, panY:8, zoom:122};
+  if(k==="T") return {rx:-Math.PI/2, ry:0, rz:0, panX:0, panY:8, zoom:122};
+  if(k==="D") return {rx:Math.PI/2, ry:0, rz:0, panX:0, panY:8, zoom:122};
+  return null;
+}
+
+// Desktop/touch controls
+let pointers=new Map(), lastSingle=null, lastPinch=null;
+function angleWrap(a){
+  while(a<=-Math.PI) a+=2*Math.PI;
+  while(a>Math.PI) a-=2*Math.PI;
+  return a;
+}
+function screenMetrics(){
+  const quads=buildQuads();
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for(const q of quads){
+    for(const p of q.pts){
+      const [sx,sy]=project(p);
+      minX=Math.min(minX,sx); minY=Math.min(minY,sy);
+      maxX=Math.max(maxX,sx); maxY=Math.max(maxY,sy);
+    }
+  }
+  const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+  const rx=Math.max(1,(maxX-minX)/2), ry=Math.max(1,(maxY-minY)/2);
+  return {
+    cx,cy,rx,ry,
+    rollStart:Math.max(rx,ry)*1.35,
+    outer:Math.max(rx,ry)*2.15
+  };
+}
+function pointerModeAt(clientX,clientY,baseMode){
+  if(baseMode!=="rotate") return baseMode;
+  const rect=canvas.getBoundingClientRect();
+  const x=clientX-rect.left, y=clientY-rect.top;
+  const m=screenMetrics();
+  const dist=Math.hypot(x-m.cx,y-m.cy);
+  return dist>=m.rollStart ? "orbitZ" : "rotate";
+}
+function updateHover3D(clientX,clientY){
+  const rect=canvas.getBoundingClientRect();
+  hover3D.active=true;
+  hover3D.x=clientX-rect.left;
+  hover3D.y=clientY-rect.top;
+  hover3D.mode=pointerModeAt(clientX,clientY,"rotate");
+  canvas.style.cursor=hover3D.mode==="orbitZ" ? "crosshair" : "grab";
+}
+canvas.addEventListener("contextmenu",ev=>ev.preventDefault());
+canvas.addEventListener("mouseenter",()=>{ view3DHotkeysActive = true; });
+canvas.addEventListener("pointerenter",ev=>{ if(ev.pointerType==="mouse") { updateHover3D(ev.clientX,ev.clientY); draw3D(); }});
+canvas.addEventListener("pointerdown",ev=>{
+  if(ev.pointerType==="mouse" && ev.button!==0 && ev.button!==2) return;
+  canvas.setPointerCapture(ev.pointerId);
+  let mode=ev.pointerType==="mouse" && ev.button===2 ? "pan" : "rotate";
+  mode=pointerModeAt(ev.clientX,ev.clientY,mode);
+  const point={x:ev.clientX,y:ev.clientY,mode};
+  if(mode==="orbitZ"){
+    const rect=canvas.getBoundingClientRect();
+    const m=screenMetrics();
+    point.orbitCx=m.cx;
+    point.orbitCy=m.cy;
+    point.orbitStartAngle=Math.atan2(ev.clientY-rect.top-m.cy, ev.clientX-rect.left-m.cx);
+    point.orbitStartRz=cam.rz;
+  }
+  pointers.set(ev.pointerId,point);
+  if(pointers.size===1) lastSingle={...point};
+  if(pointers.size===2) lastPinch=pinchState();
+  canvas.style.cursor=mode==="pan" ? "move" : (mode==="orbitZ" ? "crosshair" : "grabbing");
+});
+canvas.addEventListener("pointermove",ev=>{
+  if(ev.pointerType==="mouse" && pointers.size===0){
+    updateHover3D(ev.clientX,ev.clientY);
+    draw3D();
+    return;
+  }
+  if(!pointers.has(ev.pointerId))return;
+  const prev=pointers.get(ev.pointerId);
+  pointers.set(ev.pointerId,{...prev,x:ev.clientX,y:ev.clientY});
+  if(pointers.size===1&&lastSingle){
+    const p=[...pointers.values()][0],dx=p.x-lastSingle.x,dy=p.y-lastSingle.y;
+    if(p.mode==="pan"){
+      cam.panX+=dx;
+      cam.panY+=dy;
+    }else if(p.mode==="orbitZ"){
+      const rect=canvas.getBoundingClientRect();
+      const a1=Math.atan2(p.y-rect.top-p.orbitCy,p.x-rect.left-p.orbitCx);
+      cam.rz=p.orbitStartRz - angleWrap(a1-p.orbitStartAngle);
+    }else{
+      cam.ry+=dx*.008;
+      cam.rx+=dy*.008;
+      cam.rx=Math.max(-1.5,Math.min(1.5,cam.rx));
+    }
+    lastSingle={...p};
+    draw3D();
+  }else if(pointers.size===2&&lastPinch){
+    const now=pinchState();
+    cam.zoom*=now.dist/Math.max(1,lastPinch.dist);
+    cam.zoom=Math.max(25,Math.min(260,cam.zoom));
+    cam.panX+=now.cx-lastPinch.cx;
+    cam.panY+=now.cy-lastPinch.cy;
+    lastPinch=now;
+    draw3D();
+  }
+});
+canvas.addEventListener("pointerup",endCanvasPointer); canvas.addEventListener("pointercancel",endCanvasPointer);
+canvas.addEventListener("pointerleave",ev=>{
+  view3DHotkeysActive = false;
+  if(ev.pointerType==="mouse" && pointers.size===0){
+    hover3D.active=false;
+    canvas.style.cursor="default";
+    draw3D();
+  }
+});
+canvas.addEventListener("wheel",ev=>{
+  ev.preventDefault();
+  const factor=Math.exp(-ev.deltaY*0.0015);
+  cam.zoom*=factor;
+  cam.zoom=Math.max(25,Math.min(260,cam.zoom));
+  draw3D();
+},{passive:false});
+function endCanvasPointer(ev){
+  pointers.delete(ev.pointerId);
+  lastSingle=pointers.size===1?{...[...pointers.values()][0]}:null;
+  lastPinch=pointers.size===2?pinchState():null;
+  if(ev.pointerType==="mouse"){
+    if(pointers.size===0){
+      updateHover3D(ev.clientX,ev.clientY);
+      canvas.style.cursor=hover3D.mode==="orbitZ" ? "crosshair" : "grab";
+    }
+    draw3D();
+  }
+}
+function pinchState(){const ps=[...pointers.values()],a=ps[0],b=ps[1],dx=b.x-a.x,dy=b.y-a.y; return {dist:Math.hypot(dx,dy),cx:(a.x+b.x)/2,cy:(a.y+b.y)/2}}
+
+// Resizable panes
+const paneIds=["paneData","paneOps","panePattern","pane3d"];
+function applyPaneWeights(){
+  const isNarrow=window.matchMedia("(max-width: 950px)").matches;
+  const parts=[
+    `minmax(46px, ${paneWeights[0]}fr)`,"8px",
+    `minmax(46px, ${paneWeights[1]}fr)`,"8px",
+    `minmax(46px, ${paneWeights[2]}fr)`,"8px",
+    `minmax(46px, ${paneWeights[3]}fr)`
+  ].join(" ");
+  if(isNarrow) panes.style.gridTemplateRows=parts; else panes.style.gridTemplateColumns=parts;
+  resize();
+}
+function resetPanes(){
+  paneWeights=[20,22,26,32];
+  cam={...defaultCam};
+  for(const id of paneIds){const p=document.getElementById(id);p.classList.remove("collapsed");p.querySelector("button[data-collapse]").textContent="hide";}
+  applyPaneWeights();
+}
+let dragGutter=null;
+document.querySelectorAll(".gutter").forEach(g=>{
+  g.addEventListener("pointerdown",ev=>{g.setPointerCapture(ev.pointerId);dragGutter={idx:Number(g.dataset.gutter),startX:ev.clientX,startY:ev.clientY,weights:paneWeights.slice()}});
+  g.addEventListener("pointermove",ev=>{
+    if(!dragGutter)return;
+    const isNarrow=window.matchMedia("(max-width: 950px)").matches;
+    const delta=isNarrow?ev.clientY-dragGutter.startY:ev.clientX-dragGutter.startX;
+    const rect=panes.getBoundingClientRect();
+    const totalPixels=isNarrow?rect.height:rect.width;
+    const deltaFr=delta/Math.max(1,totalPixels)*sum(dragGutter.weights);
+    const i=dragGutter.idx;
+    paneWeights=dragGutter.weights.slice();
+    paneWeights[i]=Math.max(5,dragGutter.weights[i]+deltaFr);
+    paneWeights[i+1]=Math.max(5,dragGutter.weights[i+1]-deltaFr);
+    applyPaneWeights();
+  });
+  g.addEventListener("pointerup",()=>dragGutter=null); g.addEventListener("pointercancel",()=>dragGutter=null);
+});
+document.querySelectorAll("button[data-collapse]").forEach(b=>b.addEventListener("click",()=>{
+  const id=b.dataset.collapse,idx=paneIds.indexOf(id),pane=document.getElementById(id);
+  const c=!pane.classList.contains("collapsed"); pane.classList.toggle("collapsed",c); b.textContent=c?"show":"hide"; paneWeights[idx]=c?5:25; applyPaneWeights();
+}));
+
+function resize(){
+  const rect=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+  canvas.width=Math.max(1,Math.floor(rect.width*dpr));
+  canvas.height=Math.max(1,Math.floor(rect.height*dpr));
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  renderAll();
+}
+
+// Buttons
+document.getElementById("apply").addEventListener("click",applyEditor);
+document.getElementById("addVar").addEventListener("click",()=>{addVar(); setOpStatus(`Added ${vars[selected].name}.`);});
+document.getElementById("removeVar").addEventListener("click",removeVar);
+document.getElementById("resetPanes").addEventListener("click",resetPanes);
+window.addEventListener("resize",applyPaneWeights);
+cubeCanvas.addEventListener("mousemove",ev=>{
+  view3DHotkeysActive = true;
+  const rect=cubeCanvas.getBoundingClientRect();
+  const x=(ev.clientX-rect.left)*(cubeCanvas.width/rect.width);
+  const y=(ev.clientY-rect.top)*(cubeCanvas.height/rect.height);
+  const hit=viewCubeTargets.find(t=>t.type==="corner"
+    ? Math.hypot(x-t.x,y-t.y)<=t.r
+    : pointInPoly(x,y,t.poly));
+  cubeCanvas.style.cursor=hit ? "pointer" : "default";
+});
+cubeCanvas.addEventListener("click",ev=>{
+  view3DHotkeysActive = true;
+  const rect=cubeCanvas.getBoundingClientRect();
+  const x=(ev.clientX-rect.left)*(cubeCanvas.width/rect.width);
+  const y=(ev.clientY-rect.top)*(cubeCanvas.height/rect.height);
+  for(let i=viewCubeTargets.length-1;i>=0;i--){
+    const t=viewCubeTargets[i];
+    const hit=t.type==="corner" ? Math.hypot(x-t.x,y-t.y)<=t.r : pointInPoly(x,y,t.poly);
+    if(hit){
+      setCameraView({...defaultCam, ...t.view, panX:0, panY:8});
+      break;
+    }
+  }
+});
+pane3dEl.addEventListener("mouseenter",()=>{ view3DHotkeysActive = true; });
+pane3dEl.addEventListener("mouseleave",()=>{ view3DHotkeysActive = false; });
+window.addEventListener("keydown",ev=>{
+  if(!view3DHotkeysActive) return;
+  if(ev.key === "Escape"){
+    ev.preventDefault();
+    resetCameraView();
+    return;
+  }
+  const view=namedView(ev.key);
+  if(view){
+    ev.preventDefault();
+    setCameraView(view);
+  }
+});
+
+refreshUI();
+applyPaneWeights();
+</script>
+</body>
+</html>

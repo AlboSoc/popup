@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Signed Strip Pop-up — Operators</title>
+<style>
+  :root {
+    --bg:#f3eee2; --panel:#fffdf7; --ink:#17202a; --cut:#111; --fold:#2874a6;
+    --horiz:#2e86c1; --vert:#c0392b; --gutter:#d0c7b8;
+  }
+  html,body{margin:0;height:100%;overflow:hidden;font:14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}
+  #app{height:100%;display:grid;grid-template-rows:auto 1fr}
+  header{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#242424;color:#fff;padding:7px 9px}
+  button,textarea,input,select{font:inherit}
+  button{padding:5px 8px;border-radius:8px;border:1px solid #999;background:white;color:#111}
+  button.small{padding:3px 7px;font-size:12px}
+  #panes{min-height:0;display:grid;grid-template-columns:minmax(46px,25fr) 8px minmax(46px,25fr) 8px minmax(46px,25fr) 8px minmax(46px,25fr)}
+  .pane{min-width:0;min-height:0;position:relative;background:var(--panel);overflow:hidden}
+  .gutter{background:var(--gutter);cursor:col-resize;touch-action:none}
+  .gutter::after{content:"";display:block;width:2px;height:44px;margin:calc(50vh - 72px) auto 0;background:rgba(0,0,0,.22);border-radius:4px}
+  .title{position:absolute;top:8px;left:9px;right:9px;z-index:5;display:flex;gap:6px;justify-content:space-between;align-items:center;pointer-events:none}
+  .titleText{padding:4px 7px;border-radius:8px;background:rgba(255,255,255,.86)}
+  .title button{pointer-events:auto}
+  .collapsed>*:not(.title){display:none!important}
+  #editorWrap,#opsWrap{height:100%;display:grid;grid-template-rows:auto 1fr auto;box-sizing:border-box;padding:42px 9px 8px;gap:6px}
+  #data{width:100%;height:100%;box-sizing:border-box;resize:none;border:1px solid #bbb;border-radius:8px;padding:8px;background:#fffefb;font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  #status,#opStatus{min-height:2.7em;color:#333;font-size:12px;overflow:auto}
+  #status.bad,#opStatus.bad{color:#a00000}
+  #pattern,#view3d{width:100%;height:100%;display:block;touch-action:none}
+  #view3d{background:linear-gradient(#fffdf7,#e8ddc8)}
+  .legend{position:absolute;left:9px;bottom:8px;z-index:5;padding:6px 8px;background:rgba(255,255,255,.86);border-radius:8px;font-size:12px}
+  .sw{display:inline-block;width:16px;height:0;border-top:3px solid;vertical-align:middle;margin-right:3px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .varList{overflow:auto;border:1px solid #bbb;border-radius:8px;background:#fffefb;padding:6px}
+  .varRow{display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;border-bottom:1px solid #eee;padding:5px 0}
+  .varRow:last-child{border-bottom:0}
+  .varName{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:600}
+  .varMeta{font-size:12px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .controls{display:grid;gap:6px}
+  .twoCols{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .expr{display:grid;grid-template-columns:1fr auto;gap:6px}
+  .expr input{min-width:0;border:1px solid #bbb;border-radius:8px;padding:5px 7px}
+  select{min-width:0;border:1px solid #bbb;border-radius:8px;padding:5px 7px;background:white}
+  @media(max-width:950px){
+    #panes{grid-template-columns:1fr;grid-template-rows:minmax(46px,24fr) 8px minmax(46px,26fr) 8px minmax(46px,25fr) 8px minmax(46px,25fr)}
+    .gutter{cursor:row-resize}.gutter::after{width:44px;height:2px;margin:3px auto}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+  <button id="loadFolded">v1 folded page</button>
+  <button id="loadStep">v2 single step</button>
+  <button id="loadRichA">rich A</button>
+  <button id="loadRichB">rich B</button>
+  <button id="apply">Apply editor to selected</button>
+  <button id="resetPanes">Reset panes</button>
+  <span style="opacity:.78">3D: one finger rotate · two fingers zoom/pan</span>
+</header>
+
+<main id="panes">
+  <section class="pane" id="paneData">
+    <div class="title"><div class="titleText">Design data</div><button class="small" data-collapse="paneData">hide</button></div>
+    <div id="editorWrap">
+      <div style="font-size:12px;color:#555">
+        Selected variable JSON. Strip rule: <code>l1</code> horizontal from <code>z=H</code>, <code>l2</code> vertical, alternating.
+      </div>
+      <textarea id="data" spellcheck="false"></textarea>
+      <div id="status"></div>
+    </div>
+  </section>
+
+  <div class="gutter" data-gutter="0"></div>
+
+  <section class="pane" id="paneOps">
+    <div class="title"><div class="titleText">Operators / variables</div><button class="small" data-collapse="paneOps">hide</button></div>
+    <div id="opsWrap">
+      <div class="controls">
+        <div class="twoCols">
+          <select id="selA"></select>
+          <select id="selB"></select>
+        </div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
+          <button class="small" data-op="max">max / union</button>
+          <button class="small" data-op="min">min / intersection</button>
+          <button class="small" data-op="add">add</button>
+          <button class="small" data-op="sub">subtract A−B</button>
+        </div>
+        <div class="expr">
+          <input id="expr" value="max(v1, v2)" autocapitalize="off" autocomplete="off" spellcheck="false">
+          <button id="evalExpr" class="small">eval → new v</button>
+        </div>
+      </div>
+      <div class="varList" id="varList"></div>
+      <div id="opStatus">Operators act pointwise on the staircase height function y(u), where u=H−z. They currently require equal strip widths and equal H.</div>
+    </div>
+  </section>
+
+  <div class="gutter" data-gutter="1"></div>
+
+  <section class="pane" id="panePattern">
+    <div class="title"><div class="titleText">2D paper coordinates</div><button class="small" data-collapse="panePattern">hide</button></div>
+    <svg id="pattern"></svg>
+    <div class="legend"><span class="sw" style="border-color:var(--cut)"></span>strip cuts &nbsp;<span class="sw" style="border-color:var(--fold);border-top-style:dashed"></span>folds</div>
+  </section>
+
+  <div class="gutter" data-gutter="2"></div>
+
+  <section class="pane" id="pane3d">
+    <div class="title"><div class="titleText">90° alternating-segment mesh</div><button class="small" data-collapse="pane3d">hide</button></div>
+    <canvas id="view3d"></canvas>
+    <div class="legend"><span class="sw" style="border-color:var(--horiz)"></span>horizontal &nbsp;<span class="sw" style="border-color:var(--vert)"></span>vertical</div>
+  </section>
+</main>
+</div>
+
+<script>
+"use strict";
+
+/*
+  Operator version.
+
+  Data model:
+    { widths:[...], strips:[[l1,l2,...], ...] }
+
+  Strip endpoint invariant:
+    horizontal sum l1+l3+... = H
+    vertical   sum l2+l4+... = H
+
+  Operators:
+    A strip corresponds to a monotone staircase function y(u), u in [0,H].
+    u is distance travelled horizontally from the lower edge, equivalently u=H-z.
+    max/min/add/sub operate on this step function pointwise and convert back
+    to alternating lengths.
+
+  The conversion is deliberately simple and hackable. It keeps the representation
+  valid, but it does not yet reason about self-intersection or physical cut conflicts.
+*/
+
+const examples = {
+  folded: {
+    widths: [1],
+    strips: [[1,1]]
+  },
+  step: {
+    widths: [1.2, 1.6, 1.2],
+    strips: [
+      [2,2],
+      [0.85,0.9,1.15,1.1],
+      [2,2]
+    ]
+  },
+  richA: {
+    widths: [0.8,1,1,1,1,0.8],
+    strips: [
+      [2,2],
+      [1.3,0.5,0.7,1.5],
+      [0.9,1.1,1.1,0.9],
+      [0.55,1.35,1.45,0.65],
+      [1.1,0.8,0.9,1.2],
+      [2,2]
+    ]
+  },
+  richB: {
+    widths: [0.7,0.9,1.0,1.0,0.9,0.7],
+    strips: [
+      [2,2],
+      [0.8,0.6,0.55,0.7,0.65,0.7],
+      [0.55,1.0,0.95,0.45,0.5,0.55],
+      [0.55,0.45,0.95,1.0,0.5,0.55],
+      [0.8,0.7,0.55,0.6,0.65,0.7],
+      [2,2]
+    ]
+  }
+};
+
+let vars = [
+  {name:"v1", label:"folded page", value:structuredClone(examples.folded)},
+  {name:"v2", label:"single step cuboid", value:structuredClone(examples.step)}
+];
+let selected = 0;
+let cam = {rx:-0.62, ry:0.74, zoom:100, panX:0, panY:0};
+let paneWeights = [25,25,25,25];
+
+const panes = document.getElementById("panes");
+const dataEl = document.getElementById("data");
+const statusEl = document.getElementById("status");
+const opStatusEl = document.getElementById("opStatus");
+const varListEl = document.getElementById("varList");
+const selA = document.getElementById("selA");
+const selB = document.getElementById("selB");
+const pattern = document.getElementById("pattern");
+const canvas = document.getElementById("view3d");
+const ctx = canvas.getContext("2d");
+
+function pretty(obj){return JSON.stringify(obj,null,2)}
+function sum(a){return a.reduce((x,y)=>x+y,0)}
+function clone(x){return structuredClone(x)}
+function hsum(strip){let s=0;for(let j=0;j<strip.length;j+=2)s+=strip[j];return s}
+function vsum(strip){let s=0;for(let j=1;j<strip.length;j+=2)s+=strip[j];return s}
+function paperParams(d=currentDesign()){return {W:sum(d.widths), H:hsum(d.strips[0]), twoH:2*hsum(d.strips[0])}}
+function currentDesign(){return vars[selected].value}
+
+function validate(d){
+  if(!d || !Array.isArray(d.widths)||!Array.isArray(d.strips)) return "Expected { widths:[...], strips:[[...], ...] }";
+  if(d.widths.length!==d.strips.length) return "widths.length must equal strips.length.";
+  if(!d.widths.every(x=>Number.isFinite(x)&&x>0)) return "Every width must be positive.";
+  if(d.strips.length===0) return "Need at least one strip.";
+  const H=hsum(d.strips[0]), V=vsum(d.strips[0]);
+  if(H<=0 || V<=0) return "First strip needs positive horizontal and vertical sums.";
+  if(Math.abs(H-V)>1e-6) return `First strip endpoint mismatch: horizontal ${H.toFixed(3)}, vertical ${V.toFixed(3)}.`;
+  for(let i=0;i<d.strips.length;i++){
+    const s=d.strips[i];
+    if(!Array.isArray(s)||s.length<2) return `Strip ${i} needs at least [horizontal, vertical].`;
+    if(!s.every(x=>Number.isFinite(x)&&x>=0)) return `Strip ${i} has a non-number or negative length.`;
+    const hs=hsum(s), vs=vsum(s);
+    if(Math.abs(hs-H)>1e-6 || Math.abs(vs-H)>1e-6) return `Strip ${i} endpoint invariants fail: horizontal ${hs.toFixed(3)}, vertical ${vs.toFixed(3)}, expected both ${H.toFixed(3)}.`;
+  }
+  return "";
+}
+
+function compatible(a,b){
+  const ea=validate(a), eb=validate(b);
+  if(ea) throw Error("A invalid: "+ea);
+  if(eb) throw Error("B invalid: "+eb);
+  if(a.widths.length!==b.widths.length) throw Error("Operator requires equal number of strips.");
+  for(let i=0;i<a.widths.length;i++){
+    if(Math.abs(a.widths[i]-b.widths[i])>1e-6) throw Error("Operator requires equal strip widths.");
+  }
+  if(Math.abs(hsum(a.strips[0])-hsum(b.strips[0]))>1e-6) throw Error("Operator requires equal H.");
+  return hsum(a.strips[0]);
+}
+
+function stripBreakpoints(strip){
+  // Returns [{u, y}], including start and each horizontal endpoint / vertical jump endpoint.
+  let u=0, y=0;
+  const pts=[{u,y}];
+  for(let j=0;j<strip.length;j++){
+    const L=strip[j];
+    if(j%2===0) u += L; else y += L;
+    pts.push({u,y});
+  }
+  return pts;
+}
+
+function yAt(strip,u){
+  let curU=0, curY=0;
+  for(let j=0;j<strip.length;j++){
+    const L=strip[j];
+    if(j%2===0){
+      const nextU=curU+L;
+      if(u <= nextU + 1e-9) return curY;
+      curU=nextU;
+    }else{
+      curY += L;
+    }
+  }
+  return curY;
+}
+
+function profileToStrip(us, ys, H){
+  // Convert right-continuous monotone step samples into alternating horizontal/vertical lengths.
+  // us sorted, ys value on interval after each u.
+  const out=[];
+  let u0=0, y0=0;
+
+  for(let k=1;k<us.length;k++){
+    const u1=us[k];
+    const horiz=Math.max(0,u1-u0);
+    out.push(clean(horiz));
+    const y1=ys[k]; // value at u1 after jumps at u1
+    const vert=Math.max(0,y1-y0);
+    out.push(clean(vert));
+    u0=u1; y0=y1;
+  }
+
+  if(u0 < H-1e-9){
+    out.push(clean(H-u0));
+    u0=H;
+  }
+  if(y0 < H-1e-9){
+    out.push(clean(H-y0));
+    y0=H;
+  }
+
+  // Remove trailing zeros, but keep at least [H,H]-like structure.
+  while(out.length>2 && Math.abs(out[out.length-1])<1e-12) out.pop();
+  return out;
+}
+
+function clean(x){return Math.abs(x)<1e-10 ? 0 : Number(x.toFixed(10))}
+
+function opDesign(a,b,opName){
+  const H=compatible(a,b);
+  const out={widths:clone(a.widths), strips:[]};
+
+  for(let i=0;i<a.strips.length;i++){
+    const sa=a.strips[i], sb=b.strips[i];
+
+    // All u coordinates where either staircase may change horizontally/vertically.
+    const set=new Set([0,H]);
+    for(const p of stripBreakpoints(sa)) set.add(clean(p.u));
+    for(const p of stripBreakpoints(sb)) set.add(clean(p.u));
+    const us=[...set].filter(x=>x>=-1e-9 && x<=H+1e-9).sort((x,y)=>x-y);
+
+    const ys=[0];
+    for(let k=1;k<us.length;k++){
+      const u=us[k];
+      const ya=yAt(sa,u), yb=yAt(sb,u);
+      let y;
+      if(opName==="max") y=Math.max(ya,yb);
+      else if(opName==="min") y=Math.min(ya,yb);
+      else if(opName==="add") y=Math.min(H, ya+yb);
+      else if(opName==="sub") y=Math.max(0, ya-yb);
+      else throw Error("Unknown op "+opName);
+      y=Math.max(0,Math.min(H,y));
+      // maintain monotonicity
+      y=Math.max(ys[ys.length-1],y);
+      ys.push(clean(y));
+    }
+
+    out.strips.push(profileToStrip(us,ys,H));
+  }
+
+  const err=validate(out);
+  if(err) throw Error("Operator produced invalid result: "+err);
+  return out;
+}
+
+function max(a,b){return opDesign(a,b,"max")}
+function min(a,b){return opDesign(a,b,"min")}
+function add(a,b){return opDesign(a,b,"add")}
+function sub(a,b){return opDesign(a,b,"sub")}
+function intersection(a,b){return min(a,b)}
+function union(a,b){return max(a,b)}
+
+function addVar(label,value){
+  const err=validate(value);
+  if(err) throw Error(err);
+  const name="v"+(vars.length+1);
+  vars.push({name,label,value});
+  selected=vars.length-1;
+  refreshUI();
+  renderAll();
+  return value;
+}
+
+function setOpStatus(msg,bad=false){
+  opStatusEl.className=bad?"bad":"";
+  opStatusEl.textContent=msg;
+}
+
+function refreshUI(){
+  dataEl.value=pretty(currentDesign());
+
+  selA.innerHTML="";
+  selB.innerHTML="";
+  for(let i=0;i<vars.length;i++){
+    const optA=document.createElement("option");
+    optA.value=i; optA.textContent=`${vars[i].name}: ${vars[i].label}`;
+    const optB=optA.cloneNode(true);
+    selA.appendChild(optA); selB.appendChild(optB);
+  }
+  selA.value=Math.max(0,selected-1);
+  selB.value=selected;
+
+  varListEl.innerHTML="";
+  for(let i=0;i<vars.length;i++){
+    const v=vars[i];
+    const row=document.createElement("div");
+    row.className="varRow";
+    const err=validate(v.value);
+    const {W,H}=err ? {W:NaN,H:NaN} : paperParams(v.value);
+    row.innerHTML=`<div class="varName">${v.name}</div>
+      <div class="varMeta">${escapeHtml(v.label)} · W=${Number.isFinite(W)?W.toFixed(2):"?"}, H=${Number.isFinite(H)?H.toFixed(2):"?"}</div>
+      <button class="small">${i===selected?"shown":"show"}</button>`;
+    row.querySelector("button").addEventListener("click",()=>{
+      selected=i; refreshUI(); renderAll();
+    });
+    varListEl.appendChild(row);
+  }
+}
+
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+
+function applyEditor(){
+  let obj;
+  try{obj=JSON.parse(dataEl.value)}
+  catch(e){showStatus("JSON parse error: "+e.message,true);return}
+  const err=validate(obj);
+  if(err){showStatus(err,true);return}
+  vars[selected].value=obj;
+  vars[selected].label=vars[selected].label+"*";
+  refreshUI();
+  renderAll();
+}
+
+function evalExpression(){
+  try{
+    const ctx={max,min,add,sub,intersection,union,clone};
+    const names=vars.map(v=>v.name);
+    const values=vars.map(v=>v.value);
+    const helperNames=Object.keys(ctx);
+    const helperValues=Object.values(ctx);
+    const f=Function(...names,...helperNames,'"use strict"; return ('+document.getElementById("expr").value+');');
+    const result=f(...values,...helperValues);
+    addVar("expr: "+document.getElementById("expr").value,result);
+    setOpStatus("Added "+vars[selected].name+" from expression.");
+  }catch(e){
+    setOpStatus(e.message,true);
+  }
+}
+
+function renderAll(){
+  const err=validate(currentDesign());
+  if(err){showStatus(err,true);return}
+  const {W,H}=paperParams();
+  showStatus(`Showing ${vars[selected].name}. OK. W=${W.toFixed(3)}, H=${H.toFixed(3)}. Start edge y=-H maps to z=H.`);
+  drawPattern();
+  draw3D();
+}
+
+// 2D pattern
+function drawPattern(){
+  const d=currentDesign(), {W,H,twoH}=paperParams(d);
+  const r=pattern.getBoundingClientRect();
+  const width=r.width,height=r.height;
+  pattern.setAttribute("viewBox",`0 0 ${width} ${height}`);
+  pattern.innerHTML="";
+  const margin=42;
+  const s=Math.min((width-2*margin)/W,(height-2*margin)/twoH);
+  const ox=(width-W*s)/2, oy=height/2;
+
+  function el(n){return document.createElementNS("http://www.w3.org/2000/svg",n)}
+  function line(x1,y1,x2,y2,stroke,dash="",lw=1.4){const e=el("line");e.setAttribute("x1",x1);e.setAttribute("y1",y1);e.setAttribute("x2",x2);e.setAttribute("y2",y2);e.setAttribute("stroke",stroke);e.setAttribute("stroke-width",lw);e.setAttribute("stroke-linecap","round");if(dash)e.setAttribute("stroke-dasharray",dash);pattern.appendChild(e)}
+  function rect(x,y,w,h,fill,stroke="#ddd",lw=1){const e=el("rect");e.setAttribute("x",x);e.setAttribute("y",y);e.setAttribute("width",w);e.setAttribute("height",h);e.setAttribute("fill",fill);e.setAttribute("stroke",stroke);e.setAttribute("stroke-width",lw);pattern.appendChild(e)}
+  function text(x,y,t){const e=el("text");e.setAttribute("x",x);e.setAttribute("y",y);e.setAttribute("font-size","11");e.setAttribute("fill","#555");e.textContent=t;pattern.appendChild(e)}
+
+  const top=oy-H*s,bottom=oy+H*s;
+  rect(ox,top,W*s,H*s,"rgba(255,255,250,.95)","#bbb",1);
+  rect(ox,oy,W*s,H*s,"rgba(245,239,225,.95)","#bbb",1);
+  rect(ox,top,W*s,twoH*s,"transparent","#888",1.5);
+  line(ox,oy,ox+W*s,oy,"#2874a6","8 5",2.2);
+  text(ox+4,oy-8,"main fold y=0");
+  text(ox+W*s+6,top+4,"y=H");
+  text(ox+W*s+6,bottom,"y=-H → z=H");
+
+  let x=ox;
+  for(let i=0;i<d.widths.length;i++){
+    const stripW=d.widths[i]*s;
+    const strip=d.strips[i];
+    let t=0;
+    for(let j=0;j<strip.length;j++){
+      const t0=t,t1=t+strip[j]; t=t1;
+      const flatY0=-H+t0, flatY1=-H+t1;
+      const screenY1=oy-flatY1*s;
+      const h=(flatY1-flatY0)*s;
+      const horiz=(j%2)===0;
+      rect(x,screenY1,stripW,h,horiz?"rgba(46,134,193,.13)":"rgba(192,57,43,.11)","none",0);
+      if(j<strip.length-1){
+        const yy=oy-(-H+t1)*s;
+        line(x,yy,x+stripW,yy,"#2874a6","6 5",1.35);
+      }
+    }
+    line(x,top,x,bottom,"#111","",i===0?2.0:1.3);
+    x+=stripW;
+  }
+  line(x,top,x,bottom,"#111","",2.0);
+  text(ox,bottom+16,"Traversal starts at flat y=-H. In 3D that is z=H.");
+}
+
+// 3D
+function stripXPositions(d=currentDesign()){
+  const xs=[0]; for(const w of d.widths) xs.push(xs[xs.length-1]+w); return xs;
+}
+
+function buildQuads(){
+  const d=currentDesign(), {W,H}=paperParams(d), xs=stripXPositions(d);
+  const quads=[];
+  quads.push({pts:[[0,0,H],[W,0,H],[W,0,0],[0,0,0]],kind:"lowerSheet",axis:"sheet"});
+  quads.push({pts:[[0,0,0],[W,0,0],[W,H,0],[0,H,0]],kind:"upperSheet",axis:"sheet"});
+
+  for(let i=0;i<d.strips.length;i++){
+    const x0=xs[i],x1=xs[i+1];
+    let y=0,z=H;
+    for(let j=0;j<d.strips[i].length;j++){
+      const L=d.strips[i][j];
+      if(j%2===0){
+        const z2=z-L;
+        if(L>1e-9) quads.push({pts:[[x0,y,z],[x1,y,z],[x1,y,z2],[x0,y,z2]],kind:"strip",axis:"horizontal"});
+        z=z2;
+      }else{
+        const y2=y+L;
+        if(L>1e-9) quads.push({pts:[[x0,y,z],[x1,y,z],[x1,y2,z],[x0,y2,z]],kind:"strip",axis:"vertical"});
+        y=y2;
+      }
+    }
+  }
+  return quads;
+}
+
+function rotatePoint(p,rx,ry){
+  let [x,y,z]=p; const {W,H}=paperParams();
+  x-=W/2; y-=H/3; z-=H/3;
+  let c=Math.cos(rx),s=Math.sin(rx);
+  let y1=y*c-z*s,z1=y*s+z*c; y=y1; z=z1;
+  c=Math.cos(ry); s=Math.sin(ry);
+  let x1=x*c+z*s,z2=-x*s+z*c; x=x1; z=z2;
+  return [x,y,z];
+}
+function project(p){
+  const r=canvas.getBoundingClientRect(), q=rotatePoint(p,cam.rx,cam.ry);
+  const persp=750/(750+q[2]*cam.zoom*0.035);
+  return [r.width/2+cam.panX+q[0]*cam.zoom*persp, r.height/2+cam.panY-q[1]*cam.zoom*persp, q[2]];
+}
+function drawPoly(pts,fill,stroke="#222",lw=1.05){
+  const ps=pts.map(project); ctx.beginPath(); ctx.moveTo(ps[0][0],ps[0][1]);
+  for(let i=1;i<ps.length;i++) ctx.lineTo(ps[i][0],ps[i][1]);
+  ctx.closePath(); ctx.fillStyle=fill; ctx.fill(); ctx.strokeStyle=stroke; ctx.lineWidth=lw; ctx.stroke();
+}
+function drawLine3(a,b,stroke="#333",lw=1.4,dash=[]){
+  const pa=project(a),pb=project(b); ctx.save(); ctx.setLineDash(dash); ctx.beginPath(); ctx.moveTo(pa[0],pa[1]); ctx.lineTo(pb[0],pb[1]); ctx.strokeStyle=stroke; ctx.lineWidth=lw; ctx.stroke(); ctx.restore();
+}
+function draw3D(){
+  const r=canvas.getBoundingClientRect(); ctx.clearRect(0,0,r.width,r.height);
+  const quads=buildQuads();
+  quads.forEach(q=>q.depth=q.pts.reduce((acc,p)=>acc+rotatePoint(p,cam.rx,cam.ry)[2],0)/q.pts.length);
+  quads.sort((a,b)=>a.depth-b.depth);
+  for(const q of quads){
+    let fill;
+    if(q.kind==="lowerSheet") fill="rgba(244,238,222,.45)";
+    else if(q.kind==="upperSheet") fill="rgba(255,255,250,.45)";
+    else if(q.axis==="horizontal") fill="rgba(46,134,193,.70)";
+    else fill="rgba(192,57,43,.65)";
+    drawPoly(q.pts,fill,"#202020",q.kind.includes("Sheet")?0.9:1.25);
+  }
+  const {W,H}=paperParams();
+  drawLine3([0,0,0],[W,0,0],"#2874a6",2.0,[8,5]);
+  drawLine3([0,0,H],[W,0,H],"#555",1.3,[5,5]);
+  drawLine3([0,0,0],[0,H,0],"#444",1.2,[]);
+  drawLine3([0,0,0],[0,0,H],"#444",1.2,[]);
+  ctx.fillStyle="rgba(0,0,0,.62)"; ctx.font="12px -apple-system,BlinkMacSystemFont,sans-serif";
+  ctx.fillText("Horizontal/vertical 90° strip mesh. Operators combine staircase profiles.",10,r.height-12);
+}
+
+// Gesture controls
+let pointers=new Map(), lastSingle=null, lastPinch=null;
+canvas.addEventListener("pointerdown",ev=>{canvas.setPointerCapture(ev.pointerId); pointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY}); if(pointers.size===1)lastSingle={x:ev.clientX,y:ev.clientY}; if(pointers.size===2)lastPinch=pinchState();});
+canvas.addEventListener("pointermove",ev=>{
+  if(!pointers.has(ev.pointerId))return; pointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+  if(pointers.size===1&&lastSingle){const p=[...pointers.values()][0],dx=p.x-lastSingle.x,dy=p.y-lastSingle.y; cam.ry+=dx*.008; cam.rx+=dy*.008; cam.rx=Math.max(-1.5,Math.min(1.5,cam.rx)); lastSingle={x:p.x,y:p.y}; draw3D();}
+  else if(pointers.size===2&&lastPinch){const now=pinchState(); cam.zoom*=now.dist/Math.max(1,lastPinch.dist); cam.zoom=Math.max(25,Math.min(260,cam.zoom)); cam.panX+=now.cx-lastPinch.cx; cam.panY+=now.cy-lastPinch.cy; lastPinch=now; draw3D();}
+});
+canvas.addEventListener("pointerup",endCanvasPointer); canvas.addEventListener("pointercancel",endCanvasPointer);
+function endCanvasPointer(ev){pointers.delete(ev.pointerId); lastSingle=pointers.size===1?{...[...pointers.values()][0]}:null; lastPinch=pointers.size===2?pinchState():null}
+function pinchState(){const ps=[...pointers.values()],a=ps[0],b=ps[1],dx=b.x-a.x,dy=b.y-a.y; return {dist:Math.hypot(dx,dy),cx:(a.x+b.x)/2,cy:(a.y+b.y)/2}}
+
+// Resizable panes
+const paneIds=["paneData","paneOps","panePattern","pane3d"];
+function applyPaneWeights(){
+  const isNarrow=window.matchMedia("(max-width: 950px)").matches;
+  const parts=[
+    `minmax(46px, ${paneWeights[0]}fr)`,"8px",
+    `minmax(46px, ${paneWeights[1]}fr)`,"8px",
+    `minmax(46px, ${paneWeights[2]}fr)`,"8px",
+    `minmax(46px, ${paneWeights[3]}fr)`
+  ].join(" ");
+  if(isNarrow) panes.style.gridTemplateRows=parts; else panes.style.gridTemplateColumns=parts;
+  resize();
+}
+function resetPanes(){
+  paneWeights=[25,25,25,25];
+  for(const id of paneIds){const p=document.getElementById(id);p.classList.remove("collapsed");p.querySelector("button[data-collapse]").textContent="hide";}
+  applyPaneWeights();
+}
+let dragGutter=null;
+document.querySelectorAll(".gutter").forEach(g=>{
+  g.addEventListener("pointerdown",ev=>{g.setPointerCapture(ev.pointerId);dragGutter={idx:Number(g.dataset.gutter),startX:ev.clientX,startY:ev.clientY,weights:paneWeights.slice()}});
+  g.addEventListener("pointermove",ev=>{
+    if(!dragGutter)return;
+    const isNarrow=window.matchMedia("(max-width: 950px)").matches;
+    const delta=isNarrow?ev.clientY-dragGutter.startY:ev.clientX-dragGutter.startX;
+    const rect=panes.getBoundingClientRect();
+    const totalPixels=isNarrow?rect.height:rect.width;
+    const deltaFr=delta/Math.max(1,totalPixels)*sum(dragGutter.weights);
+    const i=dragGutter.idx;
+    paneWeights=dragGutter.weights.slice();
+    paneWeights[i]=Math.max(5,dragGutter.weights[i]+deltaFr);
+    paneWeights[i+1]=Math.max(5,dragGutter.weights[i+1]-deltaFr);
+    applyPaneWeights();
+  });
+  g.addEventListener("pointerup",()=>dragGutter=null); g.addEventListener("pointercancel",()=>dragGutter=null);
+});
+document.querySelectorAll("button[data-collapse]").forEach(b=>b.addEventListener("click",()=>{
+  const id=b.dataset.collapse,idx=paneIds.indexOf(id),pane=document.getElementById(id);
+  const c=!pane.classList.contains("collapsed"); pane.classList.toggle("collapsed",c); b.textContent=c?"show":"hide"; paneWeights[idx]=c?5:25; applyPaneWeights();
+}));
+
+function resize(){
+  const rect=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+  canvas.width=Math.max(1,Math.floor(rect.width*dpr));
+  canvas.height=Math.max(1,Math.floor(rect.height*dpr));
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  renderAll();
+}
+
+// Buttons
+document.getElementById("loadFolded").addEventListener("click",()=>{addVar("folded page",clone(examples.folded));setOpStatus("Added simple folded page.");});
+document.getElementById("loadStep").addEventListener("click",()=>{addVar("single step cuboid",clone(examples.step));setOpStatus("Added single step cuboid.");});
+document.getElementById("loadRichA").addEventListener("click",()=>{addVar("rich A",clone(examples.richA));setOpStatus("Added rich A.");});
+document.getElementById("loadRichB").addEventListener("click",()=>{addVar("rich B",clone(examples.richB));setOpStatus("Added rich B.");});
+document.getElementById("apply").addEventListener("click",applyEditor);
+document.getElementById("resetPanes").addEventListener("click",resetPanes);
+document.getElementById("evalExpr").addEventListener("click",evalExpression);
+document.querySelectorAll("button[data-op]").forEach(b=>b.addEventListener("click",()=>{
+  try{
+    const a=vars[Number(selA.value)].value, bv=vars[Number(selB.value)].value, op=b.dataset.op;
+    const result=opDesign(a,bv,op);
+    addVar(`${op}(${vars[Number(selA.value)].name}, ${vars[Number(selB.value)].name})`,result);
+    setOpStatus(`Added ${vars[selected].name}.`);
+  }catch(e){setOpStatus(e.message,true);}
+}));
+window.addEventListener("resize",applyPaneWeights);
+
+refreshUI();
+applyPaneWeights();
+</script>
+</body>
+</html>
