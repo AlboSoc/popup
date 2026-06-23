@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Popup Operator Help</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f3eee2;
+    --panel: #fffdf7;
+    --ink: #17202a;
+    --accent: #2874a6;
+    --mountain: #b04a2d;
+  }
+  body {
+    margin: 0;
+    padding: 24px;
+    font: 15px/1.5 "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  main {
+    max-width: 940px;
+    margin: 0 auto;
+    background: var(--panel);
+    border: 1px solid #ddd2bc;
+    border-radius: 16px;
+    padding: 24px 28px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+  }
+  h1, h2 { margin: 0 0 10px; }
+  h2 { margin-top: 24px; }
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  pre {
+    background: #fbf7ec;
+    border: 1px solid #e3d8c3;
+    border-radius: 12px;
+    padding: 12px 14px;
+    overflow: auto;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    border: 1px solid #ddd2bc;
+    border-radius: 12px;
+    background: #fbf7ec;
+    padding: 12px 14px;
+  }
+  .swatch {
+    display: inline-block;
+    width: 20px;
+    border-top: 3px solid;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .valley { border-color: var(--accent); border-top-style: dashed; }
+  .mountain { border-color: var(--mountain); border-top-style: dotted; }
+  .cut { border-color: #111; }
+  .edge { border-color: #444; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Popup Operator Help</h1>
+  <p>The app edits strip-based kirigami designs of the form <code>{ widths, strips }</code>. Each strip alternates horizontal and vertical travel lengths, and every strip must satisfy the shared endpoint invariant <code>hsum(strip) === vsum(strip) === H</code>.</p>
+
+  <h2>Operators</h2>
+  <div class="cards">
+    <div class="card"><strong><code>max(a, b)</code></strong><br>Union of two compatible staircase profiles.</div>
+    <div class="card"><strong><code>min(a, b)</code></strong><br>Intersection of two compatible staircase profiles.</div>
+    <div class="card"><strong><code>add(a, b)</code></strong><br>Adds heights stripwise and clamps to <code>H</code>.</div>
+    <div class="card"><strong><code>sub(a, b)</code></strong><br>Monotone envelope of the stripwise difference, clamped at <code>0</code>.</div>
+    <div class="card"><strong><code>blend(a, b, t)</code></strong><br>Interpolates between compatible profiles with <code>t</code> in <code>[0, 1]</code>.</div>
+    <div class="card"><strong><code>clamp(a, lo, hi)</code></strong><br>Constrains a design between lower and upper envelopes.</div>
+    <div class="card"><strong><code>mirror(a)</code></strong><br>Reverses strip order and strip widths.</div>
+    <div class="card"><strong><code>pad(a, start, end)</code></strong><br>Adds symmetric staircase clearance at the beginning and end of every strip.</div>
+    <div class="card"><strong><code>repeat(a, n)</code></strong><br>Tiles a design across the page width <code>n</code> times.</div>
+    <div class="card"><strong><code>concat(a, b, ...)</code></strong><br>Places compatible designs side-by-side by appending widths and strips.</div>
+    <div class="card"><strong><code>offset(a, before, after)</code></strong><br>Adds plain folded margin strips before and after a design. Negative numeric values trim removable folded-only margin from that side.</div>
+  </div>
+
+  <h2>Expression Examples</h2>
+  <pre><code>mirror(step)
+
+pad(gate, 0.2, 0.35)
+
+repeat(step, 3)
+
+concat(step, mirror(step))
+
+offset(step, [0.5, 0.5], 0.75)
+
+concat(saw, offset(mirror(saw), -2))
+
+const variant = (() => {
+  const out = clone(gate);
+  out.strips[2] = [0.5, 1.1, 1.0, 0.25, 0.5, 0.65];
+  return out;
+})();
+return clamp(blend(gate, variant, 0.4), min(gate, variant), max(gate, variant));</code></pre>
+
+  <h2>Tests</h2>
+  <p>Use the <strong>Run tests</strong> button in the app header, or run <code>runPopupOperatorTests()</code> in DevTools. The tests cover compatible operator combinations, width mismatch rejection, and the helper operators added in v2.</p>
+
+  <h2>2D Pattern Legend</h2>
+  <p><span class="swatch edge"></span>board edge, <span class="swatch cut"></span>cut, <span class="swatch valley"></span>valley fold, <span class="swatch mountain"></span>mountain fold.</p>
+  <p>The 2D pane now draws internal vertical cut segments only where adjacent strips differ in 3D state, so slits show up as actual openings instead of full-height strip separators.</p>
+
+  <h2>3D Controls</h2>
+  <p>Mouse drag rotates, the wheel zooms, right-drag pans, and the view cube or keys <code>F B L R T D</code> switch orthographic views. <code>Esc</code> resets to the drafting-style default view.</p>
+</main>
+</body>
+</html>
