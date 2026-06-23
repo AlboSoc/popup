@@ -69,6 +69,7 @@
 <main>
   <h1>Popup Operator Help</h1>
   <p>The app edits strip-based kirigami designs of the form <code>{ widths, strips }</code>. Each strip alternates horizontal and vertical travel lengths, and every strip must satisfy the shared endpoint invariant <code>hsum(strip) === vsum(strip) === H</code>.</p>
+  <p>Regression checks now live outside the UI. Run <code>npm test</code> from <code>app_v2</code> to execute the operator test harness.</p>
 
   <h2>Operators</h2>
   <div class="cards">
@@ -81,8 +82,8 @@
     <div class="card"><strong><code>mirror(a)</code></strong><br>Reverses strip order and strip widths.</div>
     <div class="card"><strong><code>pad(a, start, end)</code></strong><br>Adds symmetric staircase clearance at the beginning and end of every strip.</div>
     <div class="card"><strong><code>repeat(a, n)</code></strong><br>Tiles a design across the page width <code>n</code> times.</div>
-    <div class="card"><strong><code>concat(a, b, ...)</code></strong><br>Places compatible designs side-by-side by appending widths and strips.</div>
-    <div class="card"><strong><code>offset(a, before, after)</code></strong><br>Adds plain folded margin strips before and after a design. Negative numeric values trim removable folded-only margin from that side.</div>
+    <div class="card"><strong><code>concat(a, b, ...)</code></strong><br>Places compatible designs side-by-side, then normalizes any overlaps into a single positive-width design.</div>
+    <div class="card"><strong><code>offset(a, before, after)</code></strong><br>Adds plain folded margin strips before and after a design. Widths may be negative, which acts as overlap sugar before final normalization.</div>
   </div>
 
   <h2>Expression Examples</h2>
@@ -106,14 +107,14 @@ const variant = (() => {
 return clamp(blend(gate, variant, 0.4), min(gate, variant), max(gate, variant));</code></pre>
 
   <h2>Tests</h2>
-  <p>Use the <strong>Run tests</strong> button in the app header, or run <code>runPopupOperatorTests()</code> in DevTools. The tests cover compatible operator combinations, width mismatch rejection, and the helper operators added in v2.</p>
+  <p>Run <code>npm test</code> from <code>app_v2</code>. The test harness loads the app under Node, then runs the dedicated operator regression suite from <code>tests/operator-tests.js</code>.</p>
 
   <h2>2D Pattern Legend</h2>
   <p><span class="swatch edge"></span>board edge, <span class="swatch cut"></span>cut, <span class="swatch valley"></span>valley fold, <span class="swatch mountain"></span>mountain fold.</p>
   <p>The 2D pane now draws internal vertical cut segments only where adjacent strips differ in 3D state, so slits show up as actual openings instead of full-height strip separators.</p>
 
   <h2>3D Controls</h2>
-  <p>Mouse drag rotates, the wheel zooms, right-drag pans, and the view cube or keys <code>F B L R T D</code> switch orthographic views. <code>Esc</code> resets to the drafting-style default view.</p>
+  <p>Mouse drag rotates, the wheel zooms, right-drag pans, and the view cube or keys <code>F B L R T D</code> switch orthographic views. <code>Esc</code> resets to the drafting-style default view. With idle orbit enabled, the 3D view also slips into its screensaver-style tumble after 15 seconds without 3D interaction or after a large zoom change.</p>
 </main>
 </body>
 </html>

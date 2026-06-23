@@ -23,7 +23,94 @@ function hsum(strip) { let s = 0; for (let j = 0; j < strip.length; j += 2) s +=
 function vsum(strip) { let s = 0; for (let j = 1; j < strip.length; j += 2) s += strip[j]; return s; }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c])); }
 
-const defaultCam = { rx: 0.52, ry: 1.05, rz: 0.0, zoom: 122, panX: 0, panY: 8 };
+const CAMERA_ANIMATION_MS = 1500;
+const INTRO_CAMERA_ANIMATION_MS = 1800;
+const INTRO_SPIN_TURNS = 3;
+const FLICK_DECAY_MS = 950;
+const FLICK_START_THRESHOLD = 0.0024;
+const IDLE_DELAY_MS = 3500;
+const IDLE_FORCE_START_MS = 15000;
+const IDLE_ORBIT_ZOOM_TRIGGER = 3;
+const IDLE_ZOOM_RETURN_MS = 2200;
+const IDLE_SPIN_AXIS = [1, Math.SQRT2, (1 + Math.sqrt(5)) / 2];
+const IDLE_PRECESS_BASE_SPEED = 0.00005;
+const IDLE_PRECESS_SPEED_SWELL = 0.00042;
+const IDLE_BODY_SPIN_BASE_SPEED = 0.00008;
+const IDLE_BODY_SPIN_SPEED_SWELL = 0.0019;
+const MIN_CAMERA_ZOOM = 24;
+const MAX_CAMERA_ZOOM = 360;
+
+function quatNormalize(q) {
+  const m = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+  return [q[0] / m, q[1] / m, q[2] / m, q[3] / m];
+}
+
+function quatMultiplyRaw(a, b) {
+  return [
+    a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+    a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+    a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+    a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]
+  ];
+}
+
+function quatMultiply(a, b) {
+  return quatNormalize(quatMultiplyRaw(a, b));
+}
+
+function quatConjugate(q) {
+  return [-q[0], -q[1], -q[2], q[3]];
+}
+
+function quatFromAxisAngle(axis, angle) {
+  const [ax, ay, az] = vecNorm(axis);
+  const half = angle / 2;
+  const s = Math.sin(half);
+  return quatNormalize([ax * s, ay * s, az * s, Math.cos(half)]);
+}
+
+function quatFromEuler(rx, ry, rz) {
+  return quatMultiply(
+    quatFromAxisAngle([0, 0, 1], rz),
+    quatMultiply(
+      quatFromAxisAngle([0, 1, 0], ry),
+      quatFromAxisAngle([1, 0, 0], rx)
+    )
+  );
+}
+
+function quatRotateVec(q, v) {
+  const p = [v[0], v[1], v[2], 0];
+  const qp = quatMultiplyRaw(quatMultiplyRaw(q, p), quatConjugate(q));
+  return [qp[0], qp[1], qp[2]];
+}
+
+function quatNlerp(a, b, t) {
+  let qb = b;
+  if (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3] < 0) qb = [-b[0], -b[1], -b[2], -b[3]];
+  return quatNormalize([
+    a[0] * (1 - t) + qb[0] * t,
+    a[1] * (1 - t) + qb[1] * t,
+    a[2] * (1 - t) + qb[2] * t,
+    a[3] * (1 - t) + qb[3] * t
+  ]);
+}
+
+function quatAngleBetween(a, b) {
+  const dot = Math.min(1, Math.max(-1, Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3])));
+  return 2 * Math.acos(dot);
+}
+
+function cameraPose(view = {}) {
+  return {
+    quat: quatNormalize(view.quat ? view.quat.slice() : quatFromEuler(0.24, 0.32, 0.08)),
+    zoom: Number.isFinite(view.zoom) ? view.zoom : 116,
+    panX: Number.isFinite(view.panX) ? view.panX : 0,
+    panY: Number.isFinite(view.panY) ? view.panY : 0
+  };
+}
+
+const defaultCam = cameraPose();
 
 const panes = document.getElementById("panes");
 const dataEl = document.getElementById("data");
@@ -47,10 +134,23 @@ const gl = glCanvas.getContext("webgl", { antialias: true, alpha: true, premulti
 const cubeCanvas = document.getElementById("viewCube");
 const cubeCtx = cubeCanvas.getContext("2d");
 const pane3dEl = document.getElementById("pane3d");
+const idleOrbitEl = document.getElementById("idleOrbit");
 
 let selected = 0;
 let displayedDesign = 0;
-let cam = { ...defaultCam };
+let cam = cameraPose(defaultCam);
+let camTarget = cameraPose(defaultCam);
+let camAnimHandle = 0;
+let camAnimation = null;
+let inertiaHandle = 0;
+let angularVelocity = [0, 0, 0];
+let inertiaLastTime = 0;
+let lastInteractionTime = performance.now();
+let idleOrbitHandle = 0;
+let idleOrbitLastTime = 0;
+let idleOrbitActive = false;
+let idleOrbitStartedAt = 0;
+let idleOrbitAxis = vecNorm(IDLE_SPIN_AXIS);
 let paneWeights = [20, 22, 26, 32];
 let hover3D = { active: false, x: 0, y: 0, mode: "rotate" };
 let view3DHotkeysActive = false;
@@ -164,20 +264,26 @@ function showStatus(msg, bad = false) {
 }
 
 function setSelected(index) {
+  const priorDisplayed = displayedDesign;
   selected = index;
-  if (isDesignVar(vars[index])) displayedDesign = index;
+  if (isDesignVar(vars[index])) {
+    displayedDesign = index;
+    if (displayedDesign !== priorDisplayed) startPlotSelectionAnimation();
+  }
 }
 
 function compatible(a, b) {
-  const ea = validate(a), eb = validate(b);
+  const na = normalizeSugaredDesign(a);
+  const nb = normalizeSugaredDesign(b);
+  const ea = validate(na), eb = validate(nb);
   if (ea) throw Error("A invalid: " + ea);
   if (eb) throw Error("B invalid: " + eb);
-  if (a.widths.length !== b.widths.length) throw Error("Operator requires equal number of strips.");
-  for (let i = 0; i < a.widths.length; i++) {
-    if (Math.abs(a.widths[i] - b.widths[i]) > 1e-6) throw Error("Operator requires equal strip widths.");
+  if (na.widths.length !== nb.widths.length) throw Error("Operator requires equal number of strips.");
+  for (let i = 0; i < na.widths.length; i++) {
+    if (Math.abs(na.widths[i] - nb.widths[i]) > 1e-6) throw Error("Operator requires equal strip widths.");
   }
-  if (Math.abs(hsum(a.strips[0]) - hsum(b.strips[0])) > 1e-6) throw Error("Operator requires equal H.");
-  return hsum(a.strips[0]);
+  if (Math.abs(hsum(na.strips[0]) - hsum(nb.strips[0])) > 1e-6) throw Error("Operator requires equal H.");
+  return { a: na, b: nb, H: hsum(na.strips[0]) };
 }
 
 function stripBreakpoints(strip) {
@@ -233,6 +339,84 @@ function normalizeDesign(design) {
   };
 }
 
+function canonicalizeSugaredDesign(design) {
+  if (!isDesignShape(design)) return design;
+  return {
+    widths: design.widths.map(clean),
+    strips: design.strips.map(canonicalizeStrip)
+  };
+}
+
+function validateSugaredDesign(design) {
+  if (!design || !Array.isArray(design.widths) || !Array.isArray(design.strips)) return "Expected { widths:[...], strips:[[...], ...] }";
+  if (design.widths.length !== design.strips.length) return "widths.length must equal strips.length.";
+  if (design.strips.length === 0) return "Need at least one strip.";
+  if (!design.widths.every(x => Number.isFinite(x))) return "Every width must be numeric.";
+  const H = hsum(design.strips[0]);
+  const V = vsum(design.strips[0]);
+  if (H <= 0 || V <= 0) return "First strip needs positive horizontal and vertical sums.";
+  if (Math.abs(H - V) > 1e-6) return `First strip endpoint mismatch: horizontal ${H.toFixed(3)}, vertical ${V.toFixed(3)}.`;
+  for (let i = 0; i < design.strips.length; i++) {
+    const s = design.strips[i];
+    if (!Array.isArray(s) || s.length < 2) return `Strip ${i} needs at least [horizontal, vertical].`;
+    if (!s.every(x => Number.isFinite(x) && x >= 0)) return `Strip ${i} has a non-number or negative length.`;
+    const hs = hsum(s);
+    const vs = vsum(s);
+    if (Math.abs(hs - H) > 1e-6 || Math.abs(vs - H) > 1e-6) {
+      return `Strip ${i} endpoint invariants fail: horizontal ${hs.toFixed(3)}, vertical ${vs.toFixed(3)}, expected both ${H.toFixed(3)}.`;
+    }
+  }
+  return "";
+}
+
+function mergeStripsMax(strips, H) {
+  let merged = canonicalizeStrip([clean(H), clean(H)]);
+  for (const strip of strips) merged = combineStrip(merged, strip, H, (a, b) => Math.max(a, b));
+  return merged;
+}
+
+function normalizeSugaredDesign(design) {
+  if (!isDesignShape(design)) return design;
+  const sugared = canonicalizeSugaredDesign(design);
+  const err = validateSugaredDesign(sugared);
+  if (err) throw Error(err);
+  const H = hsum(sugared.strips[0]);
+  const spans = [];
+  const boundaries = [];
+  let x = 0;
+  for (let i = 0; i < sugared.widths.length; i++) {
+    const nextX = clean(x + sugared.widths[i]);
+    const left = clean(Math.min(x, nextX));
+    const right = clean(Math.max(x, nextX));
+    if (right - left > 1e-9) {
+      spans.push({ left, right, strip: sugared.strips[i] });
+      boundaries.push(left, right);
+    }
+    x = nextX;
+  }
+  if (!spans.length) throw Error("Need at least one non-zero strip width.");
+  boundaries.sort((a, b) => a - b);
+  const xs = [];
+  for (const value of boundaries) {
+    if (!xs.length || Math.abs(value - xs[xs.length - 1]) > 1e-9) xs.push(value);
+  }
+  const out = { widths: [], strips: [] };
+  for (let i = 0; i < xs.length - 1; i++) {
+    const xa = xs[i];
+    const xb = xs[i + 1];
+    if (xb <= xa + 1e-9) continue;
+    const covering = spans
+      .filter(span => span.left < xb - 1e-9 && span.right > xa + 1e-9)
+      .map(span => span.strip);
+    out.widths.push(clean(xb - xa));
+    out.strips.push(covering.length ? mergeStripsMax(covering, H) : canonicalizeStrip([clean(H), clean(H)]));
+  }
+  const normalized = normalizeDesign(out);
+  const normalizedErr = validate(normalized);
+  if (normalizedErr) throw Error(normalizedErr);
+  return normalized;
+}
+
 function clamp01Height(y, H) {
   return clean(Math.max(0, Math.min(H, y)));
 }
@@ -277,10 +461,10 @@ function combineStrip(sa, sb, H, combineFn, forceMonotone = true) {
 }
 
 function combineDesigns(a, b, label, combineFn, forceMonotone = true) {
-  const H = compatible(a, b);
-  const out = { widths: clone(a.widths), strips: [] };
-  for (let i = 0; i < a.strips.length; i++) {
-    const sa = a.strips[i], sb = b.strips[i];
+  const { a: na, b: nb, H } = compatible(a, b);
+  const out = { widths: clone(na.widths), strips: [] };
+  for (let i = 0; i < na.strips.length; i++) {
+    const sa = na.strips[i], sb = nb.strips[i];
     out.strips.push(combineStrip(sa, sb, H, combineFn, forceMonotone));
   }
   const normalized = normalizeDesign(out);
@@ -302,14 +486,14 @@ function blend(a, b, t = 0.5) {
 }
 function clamp(design, lower, upper) { return max(lower, min(design, upper)); }
 function mirror(design) {
-  const out = clone(design);
+  const out = clone(normalizeSugaredDesign(design));
   out.widths.reverse();
   out.strips.reverse();
   return normalizeDesign(out);
 }
 function pad(design, start = 0, end = start) {
   if (![start, end].every(v => Number.isFinite(v) && v >= 0)) throw Error("pad(design, start, end) needs non-negative numeric padding.");
-  const out = clone(design);
+  const out = clone(normalizeSugaredDesign(design));
   out.strips = out.strips.map(strip => {
     const next = [];
     if (start > 1e-9) next.push(clean(start), clean(start));
@@ -323,6 +507,7 @@ function pad(design, start = 0, end = start) {
   return normalized;
 }
 function repeat(design, n) {
+  design = normalizeSugaredDesign(design);
   const times = Math.floor(Number(n));
   if (!Number.isFinite(times) || times < 1) throw Error("repeat(design, n) needs n >= 1.");
   const out = { widths: [], strips: [] };
@@ -343,45 +528,14 @@ function ensureSameH(a, b, label) {
 function widthsArg(spec, label) {
   if (Array.isArray(spec)) {
     const out = spec.map(clean);
-    if (!out.length || !out.every(v => Number.isFinite(v) && v > 0)) {
-      throw Error(`${label} widths must be positive numbers.`);
+    if (!out.length || !out.every(v => Number.isFinite(v) && Math.abs(v) > 1e-9)) {
+      throw Error(`${label} widths must be non-zero finite numbers.`);
     }
     return out;
   }
   const value = clean(Number(spec));
-  if (!Number.isFinite(value) || value <= 0) throw Error(`${label} width must be positive.`);
+  if (!Number.isFinite(value) || Math.abs(value) <= 1e-9) throw Error(`${label} width must be non-zero.`);
   return [value];
-}
-
-function isPlainFoldedStrip(strip, H) {
-  return Array.isArray(strip) && strip.length === 2 && Math.abs(clean(strip[0]) - H) <= 1e-6 && Math.abs(clean(strip[1]) - H) <= 1e-6;
-}
-
-function trimFoldedMargin(design, amount, side = "left") {
-  let remaining = clean(amount);
-  if (!(remaining > 0)) return normalizeDesign(design);
-  const out = clone(design);
-  const H = hsum(out.strips[0]);
-  while (remaining > 1e-9) {
-    if (!out.widths.length) throw Error(`offset cannot trim beyond the ${side} edge.`);
-    const index = side === "left" ? 0 : out.widths.length - 1;
-    const width = clean(out.widths[index]);
-    if (!isPlainFoldedStrip(out.strips[index], H)) {
-      throw Error(`offset cannot trim ${remaining.toFixed(3)} from the ${side}; only plain folded margin can be removed.`);
-    }
-    if (width <= remaining + 1e-9) {
-      out.widths.splice(index, 1);
-      out.strips.splice(index, 1);
-      remaining = clean(remaining - width);
-    } else {
-      out.widths[index] = clean(width - remaining);
-      remaining = 0;
-    }
-  }
-  const normalized = normalizeDesign(out);
-  const err = validate(normalized);
-  if (err) throw Error(`offset trim produced invalid result: ${err}`);
-  return normalized;
 }
 
 function concat(...designs) {
@@ -390,15 +544,16 @@ function concat(...designs) {
   let H = null;
   for (const design of designs) {
     if (!isDesignShape(design)) throw Error("concat(...) arguments must be designs.");
-    const normalized = normalizeDesign(design);
-    const err = validate(normalized);
+    const sugared = canonicalizeSugaredDesign(design);
+    const err = validateSugaredDesign(sugared);
     if (err) throw Error(`concat input invalid: ${err}`);
-    if (H == null) H = hsum(normalized.strips[0]);
-    else ensureSameH({ strips: [[H, H]] }, normalized, "concat");
-    out.widths.push(...normalized.widths.map(clean));
-    out.strips.push(...normalized.strips.map(strip => strip.map(clean)));
+    const thisH = hsum(sugared.strips[0]);
+    if (H == null) H = thisH;
+    else if (Math.abs(H - thisH) > 1e-6) throw Error("concat(...) requires equal H.");
+    out.widths.push(...sugared.widths.map(clean));
+    out.strips.push(...sugared.strips.map(strip => strip.map(clean)));
   }
-  const normalized = normalizeDesign(out);
+  const normalized = normalizeSugaredDesign(out);
   const err = validate(normalized);
   if (err) throw Error(`concat produced invalid result: ${err}`);
   return normalized;
@@ -406,25 +561,21 @@ function concat(...designs) {
 
 function offset(design, before, after = 0) {
   if (!isDesignShape(design)) throw Error("offset(design, before, after) needs a design as its first argument.");
-  let normalized = normalizeDesign(design);
-  const err = validate(normalized);
+  const sugared = canonicalizeSugaredDesign(design);
+  const err = validateSugaredDesign(sugared);
   if (err) throw Error(`offset input invalid: ${err}`);
-  const beforeNum = Array.isArray(before) ? NaN : Number(before);
-  const afterNum = Array.isArray(after) ? NaN : Number(after);
-  if (Number.isFinite(beforeNum) && beforeNum < 0) normalized = trimFoldedMargin(normalized, -beforeNum, "left");
-  if (Number.isFinite(afterNum) && afterNum < 0) normalized = trimFoldedMargin(normalized, -afterNum, "right");
-  const H = hsum(normalized.strips[0]);
-  const leftWidths = Number.isFinite(beforeNum) && beforeNum < 0 ? [] : widthsArg(before, "offset(before)");
-  const rightWidths = Number.isFinite(afterNum) && afterNum < 0 ? [] : (after === 0 ? [] : widthsArg(after, "offset(after)"));
-  const folded = widths => ({
-    widths,
-    strips: widths.map(() => [clean(H), clean(H)])
+  const leftWidths = before === 0 ? [] : widthsArg(before, "offset(before)");
+  const rightWidths = after === 0 ? [] : widthsArg(after, "offset(after)");
+  const H = hsum(sugared.strips[0]);
+  const filler = [clean(H), clean(H)];
+  return canonicalizeSugaredDesign({
+    widths: [...leftWidths, ...sugared.widths.map(clean), ...rightWidths],
+    strips: [
+      ...leftWidths.map(() => filler.slice()),
+      ...sugared.strips.map(strip => strip.map(clean)),
+      ...rightWidths.map(() => filler.slice())
+    ]
   });
-  const parts = [];
-  if (leftWidths.length) parts.push(folded(leftWidths));
-  parts.push(normalized);
-  if (rightWidths.length) parts.push(folded(rightWidths));
-  return concat(...parts);
 }
 
 function foldedDesign(widths, H) {
@@ -1051,160 +1202,6 @@ function progressiveSubdividedRidge(options = {}) {
   });
 }
 
-function runOperatorTests() {
-  const cases = [
-    {
-      name: "folded max folded",
-      fn: () => max(examples.folded, examples.folded)
-    },
-    {
-      name: "folded sub folded",
-      fn: () => sub(examples.folded, examples.folded),
-      expect: pretty(examples.folded)
-    },
-    {
-      name: "gate max variant",
-      fn: () => {
-        const variant = clone(examples.gate);
-        variant.strips[2] = [0.5, 1.1, 1.0, 0.25, 0.5, 0.65];
-        return max(examples.gate, variant);
-      }
-    },
-    {
-      name: "gate min variant",
-      fn: () => {
-        const variant = clone(examples.gate);
-        variant.strips[2] = [0.5, 1.1, 1.0, 0.25, 0.5, 0.65];
-        return min(examples.gate, variant);
-      }
-    },
-    {
-      name: "gate max/min difference",
-      fn: () => {
-        const variant = clone(examples.gate);
-        variant.strips[2] = [0.5, 1.1, 1.0, 0.25, 0.5, 0.65];
-        return sub(max(examples.gate, variant), min(examples.gate, variant));
-      }
-    },
-    {
-      name: "width mismatch rejected",
-      fn: () => max(examples.step, examples.gate),
-      shouldThrow: /equal number of strips|equal strip widths/
-    },
-    {
-      name: "mirror reverses strips",
-      fn: () => mirror(examples.step),
-      expectFn: value => value.widths[0] === examples.step.widths[2] && pretty(mirror(value)) === pretty(examples.step)
-    },
-    {
-      name: "pad increases H symmetrically",
-      fn: () => pad(examples.folded, 0.25, 0.5),
-      expectFn: value => Math.abs(hsum(value.strips[0]) - 1.75) < 1e-6
-    },
-    {
-      name: "repeat tiles widths",
-      fn: () => repeat(examples.folded, 3),
-      expectFn: value => value.widths.length === 3 && value.strips.length === 3
-    },
-    {
-      name: "concat appends designs",
-      fn: () => concat(examples.step, examples.step),
-      expectFn: value => value.widths.length === examples.step.widths.length * 2 && value.strips.length === examples.step.strips.length * 2
-    },
-    {
-      name: "offset adds folded margins",
-      fn: () => offset(examples.step, [0.5, 0.5], 0.75),
-      expectFn: value => value.widths.length === examples.step.widths.length + 3 && pretty(value.strips[0]) === pretty([2, 2])
-    },
-    {
-      name: "offset trims folded margins with negative values",
-      fn: () => offset(examples.saw, -1, -1),
-      expectFn: value => value.widths.length === examples.saw.widths.length - 2
-    },
-    {
-      name: "blend endpoints stay valid",
-      fn: () => {
-        const variant = clone(examples.gate);
-        variant.strips[2] = [0.5, 1.1, 1.0, 0.25, 0.5, 0.65];
-        return blend(examples.gate, variant, 0.35);
-      }
-    },
-    {
-      name: "clamp keeps design between envelopes",
-      fn: () => {
-        const variant = clone(examples.gate);
-        variant.strips[2] = [0.5, 1.1, 1.0, 0.25, 0.5, 0.65];
-        return clamp(blend(examples.gate, variant, 0.5), min(examples.gate, variant), max(examples.gate, variant));
-      }
-    },
-    {
-      name: "recursiveCornerCubes validates",
-      fn: () => recursiveCornerCubes({ levels: 4 }),
-      expectFn: value => value.widths.length >= 3 && !validate(value)
-    },
-    {
-      name: "sampledSphere validates",
-      fn: () => sampledSphere({ xCount: 9, zCount: 8 }),
-      expectFn: value => value.widths.length === 9 && !validate(value)
-    },
-    {
-      name: "subdividedSphere validates",
-      fn: () => subdividedSphere({ minSpacing: 1, paperWidth: 10, H: 10 }),
-      expectFn: value => value.widths.length === 16 && !validate(value)
-    },
-    {
-      name: "progressiveSubdividedSphere validates",
-      fn: () => progressiveSubdividedSphere({ minSpacing: 1, paperWidth: 10, H: 10 }),
-      expectFn: value => value.widths.length === 16 && !validate(value)
-    },
-    {
-      name: "interleavedSampledSphere validates",
-      fn: () => interleavedSampledSphere({ xCount: 12, zCount: 10 }),
-      expectFn: value => value.widths.length === 23 && !validate(value)
-    },
-    {
-      name: "sampledCone validates",
-      fn: () => sampledCone({ xCount: 9, zCount: 8 }),
-      expectFn: value => value.widths.length === 9 && !validate(value)
-    },
-    {
-      name: "sampledRidge validates",
-      fn: () => sampledRidge({ xCount: 9, zCount: 8 }),
-      expectFn: value => value.widths.length === 9 && !validate(value)
-    }
-  ];
-
-  const results = [];
-  for (const test of cases) {
-    try {
-      const value = test.fn();
-      const err = validate(value);
-      if (err) throw Error(err);
-      if (test.shouldThrow) throw Error(`Expected error ${test.shouldThrow}, but test succeeded.`);
-      if (test.expect && pretty(value) !== test.expect) {
-        throw Error(`Expected ${test.expect}, got ${pretty(value)}`);
-      }
-      if (test.expectFn && !test.expectFn(value)) throw Error("Expectation function returned false.");
-      results.push({ name: test.name, ok: true, value });
-    } catch (error) {
-      const message = error && error.message ? error.message : String(error);
-      if (test.shouldThrow && test.shouldThrow.test(message)) {
-        results.push({ name: test.name, ok: true, expectedError: message });
-      } else {
-        results.push({ name: test.name, ok: false, error: message });
-      }
-    }
-  }
-  console.table(results.map(r => ({
-    name: r.name,
-    ok: r.ok,
-    detail: r.error || r.expectedError || "ok"
-  })));
-  return results;
-}
-
-window.runPopupOperatorTests = runOperatorTests;
-
 function buildEvalContext() {
   const ctx = {
     max, min, add, sub, intersection, union, blend, clamp, mirror, pad, repeat, concat, offset,
@@ -1226,13 +1223,50 @@ function buildEvalContext() {
   return ctx;
 }
 
+window.POPUP_TEST_API = {
+  examples,
+  max,
+  min,
+  add,
+  sub,
+  intersection,
+  union,
+  blend,
+  clamp,
+  mirror,
+  pad,
+  repeat,
+  concat,
+  offset,
+  recursiveCornerCubes,
+  sampledSphere,
+  subdividedSphere,
+  progressiveSubdividedSphere,
+  interleavedSampledSphere,
+  sampledCone,
+  sampledRidge,
+  normalizeSugaredDesign,
+  validate,
+  pretty,
+  clone,
+  hsum,
+  sum,
+  quatNormalize,
+  quatMultiply,
+  quatFromAxisAngle,
+  quatRotateVec,
+  quatNlerp,
+  quatAngleBetween,
+  easeOutQuint
+};
+
 function evaluateSource(source) {
   const trimmed = String(source).trim();
   if (!trimmed) throw Error("Expression is empty.");
 
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
-      const obj = normalizeDesign(JSON.parse(trimmed));
+      const obj = normalizeSugaredDesign(JSON.parse(trimmed));
       const err = validate(obj);
       if (!err) return obj;
     } catch (_) {
@@ -1246,14 +1280,18 @@ function evaluateSource(source) {
   const body = /\breturn\b/.test(trimmed) || /[\n;]/.test(trimmed)
     ? `"use strict";\n${trimmed}`
     : `"use strict";\nreturn (${trimmed});`;
-  const result = normalizeDesign(Function(...names, body)(...values));
+  const result = normalizeSugaredDesign(Function(...names, body)(...values));
   const err = validate(result);
   if (err) throw Error(err);
   return result;
 }
 
 function makeVar(name, description, source) {
-  return { kind: "design", name, description, source, value: evaluateSource(source) };
+  try {
+    return { kind: "design", name, description, source, value: evaluateSource(source) };
+  } catch (err) {
+    throw Error(`${name}: ${err.message}`);
+  }
 }
 
 function modelPayload() {
@@ -1461,6 +1499,7 @@ function initialVars() {
     ["terrace", "stepped terrace profile", pretty(examples.terrace)],
     ["saw", "asymmetric sawtooth profile", pretty(examples.saw)],
     ["saw2", "unit-cube diagonal lattice with growing interlocked teeth", pretty(examples.saw2)],
+    ["saw_overlap", "saw mirrored back into itself using negative-width overlap sugar", `concat(saw, offset(mirror(saw), -2, 0))`],
     ["saw2_union", "max(saw2, mirror(saw2)) builds a symmetric interlocked hill", `max(saw2, mirror(saw2))`],
     ["saw2_intersection", "min(saw2, mirror(saw2)) keeps the symmetric shared core", `min(saw2, mirror(saw2))`],
     ["sphere_relief", "sphere surface sampled over an (X, Z) grid as a stepped relief", `sampledSphere({ xCount: 15, zCount: 10 })`],
@@ -1751,22 +1790,13 @@ function buildQuads() {
   return quads;
 }
 
-function rotatePoint(p, rx, ry, rz = cam.rz) {
+function rotatePoint(p, quat = cam.quat) {
   let [x, y, z] = p;
   const { W, H } = paperParams();
   x -= W / 2;
-  y -= H / 3;
-  z -= H / 3;
-  let c = Math.cos(rx), s = Math.sin(rx);
-  let y1 = y * c - z * s, z1 = y * s + z * c;
-  y = y1; z = z1;
-  c = Math.cos(ry); s = Math.sin(ry);
-  let x1 = x * c + z * s, z2 = -x * s + z * c;
-  x = x1; z = z2;
-  c = Math.cos(rz); s = Math.sin(rz);
-  let x2 = x * c - y * s, y2 = x * s + y * c;
-  x = x2; y = y2;
-  return [x, y, z];
+  y -= H / 2;
+  z -= H / 2;
+  return quatRotateVec(quat, [x, y, z]);
 }
 
 function projectPoint(q, rect) {
@@ -1776,7 +1806,7 @@ function projectPoint(q, rect) {
 
 function project(p) {
   const rect = canvas.getBoundingClientRect();
-  return projectPoint(rotatePoint(p, cam.rx, cam.ry), rect);
+  return projectPoint(rotatePoint(p, cam.quat), rect);
 }
 
 function vecSub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
@@ -1927,6 +1957,19 @@ function mat4RotateZ(a) {
   ]);
 }
 
+function mat4FromQuat(q) {
+  const [x, y, z, w] = quatNormalize(q);
+  const xx = x * x, yy = y * y, zz = z * z;
+  const xy = x * y, xz = x * z, yz = y * z;
+  const wx = w * x, wy = w * y, wz = w * z;
+  return new Float32Array([
+    1 - 2 * (yy + zz), 2 * (xy + wz), 2 * (xz - wy), 0,
+    2 * (xy - wz), 1 - 2 * (xx + zz), 2 * (yz + wx), 0,
+    2 * (xz + wy), 2 * (yz - wx), 1 - 2 * (xx + yy), 0,
+    0, 0, 0, 1
+  ]);
+}
+
 function mat4Perspective(fovy, aspect, near, far) {
   const f = 1 / Math.tan(fovy / 2);
   const nf = 1 / (near - far);
@@ -1944,6 +1987,10 @@ function mat3FromMat4Rotation(m) {
     m[4], m[5], m[6],
     m[8], m[9], m[10]
   ]);
+}
+
+function mat3FromQuat(q) {
+  return mat3FromMat4Rotation(mat4FromQuat(q));
 }
 
 function glCompileShader(glCtx, type, source) {
@@ -2048,20 +2095,11 @@ function drawWebGL3D() {
   const { W, H } = paperParams();
   const extent = Math.max(W, H * 2, 1);
   const scale = (cam.zoom / 122) * (2.45 / extent);
-  const model =
-    mat4Multiply(
-      mat4RotateZ(cam.rz),
-      mat4Multiply(
-        mat4RotateY(cam.ry),
-        mat4Multiply(mat4RotateX(cam.rx), mat4Scale(scale, scale, scale))
-      )
-    );
+  const model = mat4Multiply(mat4FromQuat(cam.quat), mat4Scale(scale, scale, scale));
   const view = mat4Translate(cam.panX / 125, -cam.panY / 125, -4.8);
   const proj = mat4Perspective(Math.PI / 4.2, aspect, 0.1, 100);
   const matrix = mat4Multiply(proj, mat4Multiply(view, model));
-  const normalMatrix = mat3FromMat4Rotation(
-    mat4Multiply(mat4RotateZ(cam.rz), mat4Multiply(mat4RotateY(cam.ry), mat4RotateX(cam.rx)))
-  );
+  const normalMatrix = mat3FromQuat(cam.quat);
   const mesh = buildWebGLMesh();
 
   gl.viewport(0, 0, glCanvas.width, glCanvas.height);
@@ -2101,9 +2139,6 @@ function draw3D() {
   }
 
   drawRotationHalo();
-  ctx.fillStyle = "rgba(239,244,249,.76)";
-  ctx.font = "12px -apple-system,BlinkMacSystemFont,sans-serif";
-  ctx.fillText("Paper surface preview. Operators combine staircase profiles.", 10, rect.height - 12);
   drawViewCube();
 }
 
@@ -2115,6 +2150,9 @@ function angleWrap(a) {
 
 function screenMetrics() {
   const quads = buildQuads();
+  const rect = canvas.getBoundingClientRect();
+  const { W, H } = paperParams();
+  const [cx, cy] = projectPoint(rotatePoint([W / 2, H / 2, H / 2]), rect);
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const q of quads) {
     for (const p of q.pts) {
@@ -2125,11 +2163,24 @@ function screenMetrics() {
       maxY = Math.max(maxY, sy);
     }
   }
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-  const rx = Math.max(1, (maxX - minX) / 2);
-  const ry = Math.max(1, (maxY - minY) / 2);
-  return { cx, cy, rx, ry, rollStart: Math.max(rx, ry) * 1.35, outer: Math.max(rx, ry) * 2.15 };
+  let radius = 1;
+  for (const q of quads) {
+    for (const p of q.pts) {
+      const [sx, sy] = project(p);
+      radius = Math.max(radius, Math.hypot(sx - cx, sy - cy));
+    }
+  }
+  const viewRadius = Math.max(40, Math.min(rect.width, rect.height) * 0.46);
+  const objectRadius = radius;
+  const rollStart = Math.min(objectRadius * 1.35, viewRadius - 16);
+  return {
+    cx,
+    cy,
+    rx: radius,
+    ry: radius,
+    rollStart: Math.max(24, rollStart),
+    outer: viewRadius
+  };
 }
 
 function drawRotationHalo() {
@@ -2137,8 +2188,8 @@ function drawRotationHalo() {
   const m = screenMetrics();
   const dist = Math.hypot(hover3D.x - m.cx, hover3D.y - m.cy);
   const inOrbitBand = dist >= m.rollStart;
-  const outerRadius = Math.min(m.outer, Math.min(canvas.getBoundingClientRect().width, canvas.getBoundingClientRect().height) * 0.46);
-  const rollRadius = Math.min(m.rollStart, outerRadius - 16);
+  const outerRadius = m.outer;
+  const rollRadius = m.rollStart;
   ctx.save();
   ctx.lineWidth = 1.5;
   ctx.setLineDash([6, 6]);
@@ -2167,18 +2218,8 @@ function drawRotationHalo() {
   ctx.restore();
 }
 
-function cubeRotatePoint(p, rx = cam.rx, ry = cam.ry, rz = cam.rz) {
-  let [x, y, z] = p;
-  let c = Math.cos(rx), s = Math.sin(rx);
-  let y1 = y * c - z * s, z1 = y * s + z * c;
-  y = y1; z = z1;
-  c = Math.cos(ry); s = Math.sin(ry);
-  let x1 = x * c + z * s, z2 = -x * s + z * c;
-  x = x1; z = z2;
-  c = Math.cos(rz); s = Math.sin(rz);
-  let x2 = x * c - y * s, y2 = x * s + y * c;
-  x = x2; y = y2;
-  return [x, y, z];
+function cubeRotatePoint(p, quat = cam.quat) {
+  return quatRotateVec(quat, p);
 }
 
 function pointInPoly(x, y, poly) {
@@ -2191,83 +2232,309 @@ function pointInPoly(x, y, poly) {
   return inside;
 }
 
-function setCameraView(view) {
-  cam = { ...cam, ...view };
-  draw3D();
+function polygonArea(poly) {
+  let area = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    area += poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
+  }
+  return area / 2;
 }
 
-function resetCameraView() {
-  setCameraView({ ...defaultCam });
+function cubeTargetContains(target, x, y) {
+  if (Number.isFinite(target.r)) return Math.hypot(x - target.x, y - target.y) <= target.r;
+  if (target.poly) return pointInPoly(x, y, target.poly);
+  return false;
+}
+
+function cameraSettled(a, b = camTarget) {
+  return quatAngleBetween(a.quat, b.quat) < 1e-4
+    && Math.abs(a.zoom - b.zoom) < 0.05
+    && Math.abs(a.panX - b.panX) < 0.05
+    && Math.abs(a.panY - b.panY) < 0.05;
+}
+
+function syncCameraTarget() {
+  camTarget = cameraPose(cam);
+}
+
+function stopCameraAnimation() {
+  if (camAnimHandle) cancelAnimationFrame(camAnimHandle);
+  camAnimHandle = 0;
+  camAnimation = null;
+}
+
+function easeOutQuint(t) {
+  return 1 - Math.pow(1 - t, 5);
+}
+
+function animateCameraStep(now) {
+  if (!camAnimation) {
+    camAnimHandle = 0;
+    return;
+  }
+  if (camAnimation.startTime == null) camAnimation.startTime = now;
+  const elapsed = Math.max(0, now - camAnimation.startTime);
+  const progress = Math.min(1, elapsed / camAnimation.duration);
+  const eased = easeOutQuint(progress);
+  const start = camAnimation.start;
+  const baseQuat = quatNlerp(start.quat, camTarget.quat, eased);
+  if (camAnimation.spinTurns) {
+    const spinAngle = Math.PI * 2 * camAnimation.spinTurns * (1 - eased);
+    cam.quat = quatMultiply(quatFromAxisAngle(camAnimation.spinAxis || [0, 1, 0], spinAngle), baseQuat);
+  } else {
+    cam.quat = baseQuat;
+  }
+  cam.zoom = start.zoom + (camTarget.zoom - start.zoom) * eased;
+  cam.panX = start.panX + (camTarget.panX - start.panX) * eased;
+  cam.panY = start.panY + (camTarget.panY - start.panY) * eased;
+  draw3D();
+  if (progress >= 1 || cameraSettled(cam, camTarget)) {
+    cam = cameraPose(camTarget);
+    camAnimation = null;
+    camAnimHandle = 0;
+    draw3D();
+    return;
+  }
+  camAnimHandle = requestAnimationFrame(animateCameraStep);
+}
+
+function ensureCameraAnimation() {
+  camAnimation = {
+    start: cameraPose(cam),
+    startTime: null,
+    duration: CAMERA_ANIMATION_MS
+  };
+  if (camAnimHandle) cancelAnimationFrame(camAnimHandle);
+  camAnimHandle = requestAnimationFrame(animateCameraStep);
+}
+
+function setCameraView(view, options = {}) {
+  const next = cameraPose({ ...camTarget, ...view });
+  camTarget = next;
+  stopInertia();
+  noteCameraInteraction();
+  if (options.immediate) {
+    stopCameraAnimation();
+    cam = cameraPose(next);
+    draw3D();
+    return;
+  }
+  ensureCameraAnimation();
+}
+
+function startPlotSelectionAnimation() {
+  const target = cameraPose(defaultCam);
+  stopCameraAnimation();
+  stopInertia();
+  cam = cameraPose({
+    ...target,
+    quat: target.quat,
+    zoom: target.zoom * 0.42,
+    panX: target.panX,
+    panY: target.panY + 8
+  });
+  camTarget = target;
+  noteCameraInteraction();
+  draw3D();
+  camAnimation = {
+    start: cameraPose(cam),
+    startTime: null,
+    duration: INTRO_CAMERA_ANIMATION_MS,
+    spinAxis: [0, 1, 0],
+    spinTurns: INTRO_SPIN_TURNS
+  };
+  camAnimHandle = requestAnimationFrame(animateCameraStep);
+}
+
+function resetCameraView(options = {}) {
+  setCameraView(defaultCam, options);
+}
+
+function noteCameraInteraction() {
+  lastInteractionTime = performance.now();
+  idleOrbitActive = false;
+  idleOrbitStartedAt = 0;
+}
+
+function stopInertia() {
+  if (inertiaHandle) cancelAnimationFrame(inertiaHandle);
+  inertiaHandle = 0;
+  angularVelocity = [0, 0, 0];
+  inertiaLastTime = 0;
+}
+
+function applyAngularStep(velocity, dt) {
+  const magnitude = Math.hypot(velocity[0], velocity[1], velocity[2]);
+  if (magnitude < 1e-8 || dt <= 0) return;
+  const q = quatFromAxisAngle(velocity, magnitude * dt);
+  cam.quat = quatMultiply(q, cam.quat);
+  syncCameraTarget();
+}
+
+function inertiaStep(now) {
+  if (!inertiaLastTime) inertiaLastTime = now;
+  const dt = Math.min(40, Math.max(0, now - inertiaLastTime));
+  inertiaLastTime = now;
+  applyAngularStep(angularVelocity, dt);
+  const decay = Math.exp(-dt / FLICK_DECAY_MS);
+  angularVelocity = angularVelocity.map(v => v * decay);
+  draw3D();
+  if (Math.hypot(...angularVelocity) < 0.000025) {
+    stopInertia();
+    noteCameraInteraction();
+    return;
+  }
+  inertiaHandle = requestAnimationFrame(inertiaStep);
+}
+
+function startInertia(velocity) {
+  stopCameraAnimation();
+  stopInertia();
+  angularVelocity = velocity.slice();
+  if (Math.hypot(...angularVelocity) < FLICK_START_THRESHOLD) return;
+  inertiaHandle = requestAnimationFrame(inertiaStep);
+}
+
+function idleOrbitStep(now) {
+  if (!idleOrbitLastTime) idleOrbitLastTime = now;
+  const dt = Math.min(40, Math.max(0, now - idleOrbitLastTime));
+  idleOrbitLastTime = now;
+  const idle = now - lastInteractionTime;
+  const zoomRatio = cam.zoom / Math.max(1e-9, defaultCam.zoom);
+  const idleZoomTriggered = zoomRatio >= IDLE_ORBIT_ZOOM_TRIGGER || zoomRatio <= 1 / IDLE_ORBIT_ZOOM_TRIGGER;
+  const longIdleTriggered = idle >= IDLE_FORCE_START_MS;
+  const canIdleOrbit = idleOrbitEl.checked && idle >= IDLE_DELAY_MS && pointers.size === 0 && !camAnimHandle && !inertiaHandle;
+  if (!canIdleOrbit) {
+    idleOrbitActive = false;
+    idleOrbitStartedAt = 0;
+  } else if (!idleOrbitActive && (idleZoomTriggered || longIdleTriggered)) {
+    idleOrbitActive = true;
+    idleOrbitStartedAt = now;
+    const sessionTwist = quatRotateVec(cam.quat, IDLE_SPIN_AXIS);
+    idleOrbitAxis = vecNorm([
+      sessionTwist[0],
+      sessionTwist[1] * 0.9 + IDLE_SPIN_AXIS[1] * 0.35,
+      sessionTwist[2] * 1.1 + IDLE_SPIN_AXIS[2] * 0.25
+    ]);
+  }
+  if (idleOrbitActive && canIdleOrbit) {
+    const elapsed = Math.max(0, now - idleOrbitStartedAt);
+    const phase = elapsed * 0.001;
+    const energy =
+      0.56
+      + 0.46 * Math.sin(phase * 0.17 - 0.7)
+      + 0.31 * Math.sin(phase * 0.061 + 1.8)
+      + 0.19 * Math.sin(phase * 0.43 - 0.2);
+    const surge = Math.pow(Math.max(0.03, energy), 1.35);
+    const precessSpeed =
+      IDLE_PRECESS_BASE_SPEED
+      + IDLE_PRECESS_SPEED_SWELL * (0.25 + 0.75 * Math.pow(Math.sin(phase * 0.11 + 0.4), 2));
+    const bodySpinSpeed = IDLE_BODY_SPIN_BASE_SPEED + IDLE_BODY_SPIN_SPEED_SWELL * surge;
+    const bodyZAxis = quatRotateVec(cam.quat, [0, 0, 1]);
+    const bodyXAxis = quatRotateVec(cam.quat, [1, 0, 0]);
+    const driftSpeed = 0.00012 * Math.sin(phase * 0.23 + 0.9) + 0.00005 * Math.sin(phase * 0.71 - 0.3);
+    const velocity = [
+      idleOrbitAxis[0] * precessSpeed + bodyZAxis[0] * bodySpinSpeed + bodyXAxis[0] * driftSpeed,
+      idleOrbitAxis[1] * precessSpeed + bodyZAxis[1] * bodySpinSpeed + bodyXAxis[1] * driftSpeed,
+      idleOrbitAxis[2] * precessSpeed + bodyZAxis[2] * bodySpinSpeed + bodyXAxis[2] * driftSpeed
+    ];
+    applyAngularStep(velocity, dt);
+    const zoomTarget = defaultCam.zoom * (
+      1
+      + 0.16 * Math.sin(phase * 0.29 + 1.1)
+      + 0.07 * Math.sin(phase * 0.73 - 0.8)
+    );
+    const zoomBlend = 1 - Math.exp(-dt / IDLE_ZOOM_RETURN_MS);
+    cam.zoom += (zoomTarget - cam.zoom) * zoomBlend;
+    cam.zoom = Math.max(MIN_CAMERA_ZOOM, Math.min(MAX_CAMERA_ZOOM, cam.zoom));
+    syncCameraTarget();
+    draw3D();
+  }
+  idleOrbitHandle = requestAnimationFrame(idleOrbitStep);
 }
 
 function namedView(key) {
   const k = String(key).toUpperCase();
-  if (k === "F") return { rx: 0, ry: 0, rz: 0, panX: 0, panY: 8, zoom: 122 };
-  if (k === "B") return { rx: 0, ry: Math.PI, rz: 0, panX: 0, panY: 8, zoom: 122 };
-  if (k === "R") return { rx: 0, ry: Math.PI / 2, rz: 0, panX: 0, panY: 8, zoom: 122 };
-  if (k === "L") return { rx: 0, ry: -Math.PI / 2, rz: 0, panX: 0, panY: 8, zoom: 122 };
-  if (k === "T") return { rx: -Math.PI / 2, ry: 0, rz: 0, panX: 0, panY: 8, zoom: 122 };
-  if (k === "D") return { rx: Math.PI / 2, ry: 0, rz: 0, panX: 0, panY: 8, zoom: 122 };
+  if (k === "F") return { quat: quatFromEuler(0, 0, 0) };
+  if (k === "B") return { quat: quatFromEuler(0, Math.PI, 0) };
+  // Side views are named for the direction you look from to see that face.
+  if (k === "R") return { quat: quatFromEuler(0, -Math.PI / 2, 0) };
+  if (k === "L") return { quat: quatFromEuler(0, Math.PI / 2, 0) };
+  if (k === "T") return { quat: quatFromEuler(Math.PI / 2, 0, 0) };
+  if (k === "D") return { quat: quatFromEuler(-Math.PI / 2, 0, 0) };
   return null;
 }
 
 function drawViewCube() {
   cubeCtx.clearRect(0, 0, cubeCanvas.width, cubeCanvas.height);
-  const cx = cubeCanvas.width / 2, cy = cubeCanvas.height / 2 + 4, scale = 28;
+  const cx = cubeCanvas.width / 2, cy = cubeCanvas.height / 2 + 3, scale = 22;
   const verts = [
     [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
     [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]
   ];
   const projected = verts.map(v => {
-    const r = cubeRotatePoint(v);
+    const r = cubeRotatePoint(v, cam.quat);
     return { p: [cx + r[0] * scale, cy - r[1] * scale], z: r[2], raw: v };
   });
   const faces = [
-    { name: "front", label: "F", idx: [4, 5, 6, 7], view: { rx: 0, ry: 0, rz: 0 } },
-    { name: "back", label: "B", idx: [0, 1, 2, 3], view: { rx: 0, ry: Math.PI, rz: 0 } },
-    { name: "right", label: "R", idx: [1, 5, 6, 2], view: { rx: 0, ry: Math.PI / 2, rz: 0 } },
-    { name: "left", label: "L", idx: [0, 4, 7, 3], view: { rx: 0, ry: -Math.PI / 2, rz: 0 } },
-    { name: "top", label: "T", idx: [3, 2, 6, 7], view: { rx: -Math.PI / 2, ry: 0, rz: 0 } },
-    { name: "bottom", label: "D", idx: [0, 1, 5, 4], view: { rx: Math.PI / 2, ry: 0, rz: 0 } }
+    { name: "front", label: "F", idx: [4, 5, 6, 7], view: namedView("F"), labelPos: [0, 0, 1.3] },
+    { name: "back", label: "B", idx: [0, 1, 2, 3], view: namedView("B"), labelPos: [0, 0, -1.3] },
+    { name: "right", label: "R", idx: [1, 5, 6, 2], view: namedView("R"), labelPos: [1.28, 0, 0] },
+    { name: "left", label: "L", idx: [0, 4, 7, 3], view: namedView("L"), labelPos: [-1.28, 0, 0] },
+    { name: "top", label: "T", idx: [3, 2, 6, 7], view: namedView("T"), labelPos: [0, 1.26, 0] },
+    { name: "bottom", label: "D", idx: [0, 1, 5, 4], view: namedView("D"), labelPos: [0, -1.26, 0] }
   ];
   viewCubeTargets = [];
   const light = vecNorm([-0.35, 0.82, 0.44]);
-  faces
+  const renderedFaces = faces
     .map(face => {
-      const rp = face.idx.map(i => cubeRotatePoint(verts[i]));
+      const rp = face.idx.map(i => cubeRotatePoint(verts[i], cam.quat));
       const normal = vecNorm(vecCross(vecSub(rp[1], rp[0]), vecSub(rp[2], rp[0])));
       return { ...face, normal, avgZ: rp.reduce((s, p) => s + p[2], 0) / 4 };
     })
-    .sort((a, b) => a.avgZ - b.avgZ)
-    .forEach(face => {
+    .sort((a, b) => a.avgZ - b.avgZ);
+  renderedFaces.forEach(face => {
       const poly = face.idx.map(i => projected[i].p);
-      const intensity = 0.75 + 0.16 * Math.max(0, vecDot(face.normal, light));
+      const intensity = 0.42 + 0.1 * Math.max(0, vecDot(face.normal, light));
       const tone = Math.round(255 * intensity);
       cubeCtx.beginPath();
       cubeCtx.moveTo(poly[0][0], poly[0][1]);
       for (let i = 1; i < poly.length; i++) cubeCtx.lineTo(poly[i][0], poly[i][1]);
       cubeCtx.closePath();
-      cubeCtx.fillStyle = `rgb(${tone},${tone},${Math.max(226, tone - 3)})`;
+      cubeCtx.fillStyle = `rgb(${tone},${tone},${Math.max(102, tone - 8)})`;
       cubeCtx.fill();
-      cubeCtx.strokeStyle = "rgba(70,70,70,.65)";
+      cubeCtx.strokeStyle = "rgba(120,150,176,.26)";
       cubeCtx.lineWidth = 1.1;
       cubeCtx.stroke();
-      const mx = poly.reduce((s, p) => s + p[0], 0) / poly.length;
-      const my = poly.reduce((s, p) => s + p[1], 0) / poly.length;
-      cubeCtx.fillStyle = "rgba(55,55,55,.82)";
-      cubeCtx.font = "12px -apple-system,BlinkMacSystemFont,sans-serif";
+      const labelRot = cubeRotatePoint(face.labelPos, cam.quat);
+      const lx = cx + labelRot[0] * scale;
+      const ly = cy - labelRot[1] * scale;
+      cubeCtx.lineWidth = 3.2;
+      cubeCtx.strokeStyle = "rgba(24, 38, 56, 0.92)";
+      cubeCtx.font = "10px -apple-system,BlinkMacSystemFont,sans-serif";
       cubeCtx.textAlign = "center";
       cubeCtx.textBaseline = "middle";
-      cubeCtx.fillText(face.label, mx, my);
-      if (face.normal[2] >= -0.35) viewCubeTargets.push({ type: "face", poly, view: face.view });
+      cubeCtx.strokeText(face.label, lx, ly);
+      cubeCtx.fillStyle = "rgba(248,248,250,.96)";
+      cubeCtx.fillText(face.label, lx, ly);
+      if (face.normal[2] >= -0.35) {
+        viewCubeTargets.push({ type: "face", poly, view: face.view });
+        viewCubeTargets.push({ type: "label", x: lx, y: ly, r: 9, view: face.view });
+      }
     });
-  const visibleVerts = projected.map((v, i) => ({ i, ...v })).sort((a, b) => a.z - b.z).slice(-4);
-  for (const v of visibleVerts) {
+  const zMin = Math.min(...projected.map(v => v.z));
+  const zMax = Math.max(...projected.map(v => v.z));
+  const zSpan = Math.max(1e-6, zMax - zMin);
+  for (const v of projected.map((v, i) => ({ i, ...v })).sort((a, b) => a.z - b.z)) {
+    const visibility = (v.z - zMin) / zSpan;
+    if (visibility < 0.16) continue;
+    const alpha = 0.2 + visibility * 0.75;
+    const radius = 1.6 + visibility * 1.8;
     cubeCtx.beginPath();
-    cubeCtx.arc(v.p[0], v.p[1], 3.3, 0, Math.PI * 2);
-    cubeCtx.fillStyle = "rgba(40,116,166,.9)";
+    cubeCtx.arc(v.p[0], v.p[1], radius, 0, Math.PI * 2);
+    cubeCtx.fillStyle = `rgba(40,116,166,${alpha.toFixed(3)})`;
     cubeCtx.fill();
-    cubeCtx.strokeStyle = "rgba(255,255,255,.9)";
+    cubeCtx.strokeStyle = `rgba(255,255,255,${Math.min(0.95, alpha + 0.08).toFixed(3)})`;
     cubeCtx.lineWidth = 1;
     cubeCtx.stroke();
     const [sx, sy, sz] = v.raw;
@@ -2275,8 +2542,10 @@ function drawViewCube() {
       type: "corner",
       x: v.p[0],
       y: v.p[1],
-      r: 9,
-      view: { rx: sy > 0 ? -0.68 : 0.68, ry: sx > 0 ? 0.82 : -0.82, rz: sz > 0 ? 0.0 : Math.PI }
+      r: Math.max(6, radius + 3.8),
+      view: cameraPose({
+        quat: quatFromEuler(sy > 0 ? -0.68 : 0.68, sx > 0 ? 0.82 : -0.82, sz > 0 ? 0 : Math.PI)
+      })
     });
   }
 }
@@ -2305,9 +2574,14 @@ function pinchState() {
 }
 
 function endCanvasPointer(ev) {
+  const released = pointers.get(ev.pointerId);
   pointers.delete(ev.pointerId);
   lastSingle = pointers.size === 1 ? { ...[...pointers.values()][0] } : null;
   lastPinch = pointers.size === 2 ? pinchState() : null;
+  if (released && pointers.size === 0 && (released.mode === "rotate" || released.mode === "orbitZ")) {
+    startInertia(released.velocity || [0, 0, 0]);
+  }
+  noteCameraInteraction();
   if (ev.pointerType === "mouse") {
     if (pointers.size === 0) {
       updateHover3D(ev.clientX, ev.clientY);
@@ -2332,7 +2606,9 @@ function applyPaneWeights() {
 
 function resetPanes() {
   paneWeights = [20, 22, 26, 32];
-  cam = { ...defaultCam };
+  cam = cameraPose(defaultCam);
+  camTarget = cameraPose(defaultCam);
+  stopCameraAnimation();
   for (const id of ["paneData", "paneOps", "panePattern", "pane3d"]) {
     const p = document.getElementById(id);
     p.classList.remove("collapsed");
@@ -2392,16 +2668,20 @@ canvas.addEventListener("pointerenter", ev => { if (ev.pointerType === "mouse") 
 canvas.addEventListener("pointerdown", ev => {
   if (ev.pointerType === "mouse" && ev.button !== 0 && ev.button !== 2) return;
   canvas.setPointerCapture(ev.pointerId);
+  stopCameraAnimation();
+  stopInertia();
+  noteCameraInteraction();
+  syncCameraTarget();
   let mode = ev.pointerType === "mouse" && ev.button === 2 ? "pan" : "rotate";
   mode = pointerModeAt(ev.clientX, ev.clientY, mode);
-  const point = { x: ev.clientX, y: ev.clientY, mode };
+  const point = { x: ev.clientX, y: ev.clientY, mode, time: performance.now(), velocity: [0, 0, 0] };
   if (mode === "orbitZ") {
     const rect = canvas.getBoundingClientRect();
     const m = screenMetrics();
     point.orbitCx = m.cx;
     point.orbitCy = m.cy;
     point.orbitStartAngle = Math.atan2(ev.clientY - rect.top - m.cy, ev.clientX - rect.left - m.cx);
-    point.orbitStartRz = cam.rz;
+    point.orbitStartQuat = cam.quat.slice();
   }
   pointers.set(ev.pointerId, point);
   if (pointers.size === 1) lastSingle = { ...point };
@@ -2416,30 +2696,42 @@ canvas.addEventListener("pointermove", ev => {
   }
   if (!pointers.has(ev.pointerId)) return;
   const prev = pointers.get(ev.pointerId);
-  pointers.set(ev.pointerId, { ...prev, x: ev.clientX, y: ev.clientY });
+  const nowTime = performance.now();
+  pointers.set(ev.pointerId, { ...prev, x: ev.clientX, y: ev.clientY, time: nowTime });
   if (pointers.size === 1 && lastSingle) {
     const p = [...pointers.values()][0];
     const dx = p.x - lastSingle.x, dy = p.y - lastSingle.y;
+    const dt = Math.max(1, p.time - lastSingle.time);
+    let nextVelocity = [0, 0, 0];
     if (p.mode === "pan") {
       cam.panX += dx;
       cam.panY += dy;
     } else if (p.mode === "orbitZ") {
       const rect = canvas.getBoundingClientRect();
       const a1 = Math.atan2(p.y - rect.top - p.orbitCy, p.x - rect.left - p.orbitCx);
-      cam.rz = p.orbitStartRz - angleWrap(a1 - p.orbitStartAngle);
+      const a0 = Math.atan2(lastSingle.y - rect.top - p.orbitCy, lastSingle.x - rect.left - p.orbitCx);
+      cam.quat = quatMultiply(quatFromAxisAngle([0, 0, 1], -(a1 - p.orbitStartAngle)), p.orbitStartQuat);
+      nextVelocity = [0, 0, -angleWrap(a1 - a0) / dt];
     } else {
-      cam.ry += dx * 0.008;
-      cam.rx += dy * 0.008;
-      cam.rx = Math.max(-1.5, Math.min(1.5, cam.rx));
+      const qYaw = quatFromAxisAngle([0, 1, 0], dx * 0.008);
+      const qPitch = quatFromAxisAngle([1, 0, 0], dy * 0.008);
+      cam.quat = quatMultiply(quatMultiply(qYaw, qPitch), cam.quat);
+      nextVelocity = [dy * 0.008 / dt, dx * 0.008 / dt, 0];
     }
+    p.velocity = p.velocity.map((v, i) => v * 0.58 + nextVelocity[i] * 0.42);
+    pointers.set(ev.pointerId, p);
+    syncCameraTarget();
+    noteCameraInteraction();
     lastSingle = { ...p };
     draw3D();
   } else if (pointers.size === 2 && lastPinch) {
     const now = pinchState();
     cam.zoom *= now.dist / Math.max(1, lastPinch.dist);
-    cam.zoom = Math.max(25, Math.min(260, cam.zoom));
+    cam.zoom = Math.max(MIN_CAMERA_ZOOM, Math.min(MAX_CAMERA_ZOOM, cam.zoom));
     cam.panX += now.cx - lastPinch.cx;
     cam.panY += now.cy - lastPinch.cy;
+    syncCameraTarget();
+    noteCameraInteraction();
     lastPinch = now;
     draw3D();
   }
@@ -2456,9 +2748,13 @@ canvas.addEventListener("pointerleave", ev => {
 });
 canvas.addEventListener("wheel", ev => {
   ev.preventDefault();
+  stopCameraAnimation();
+  stopInertia();
+  noteCameraInteraction();
   const factor = Math.exp(-ev.deltaY * 0.0015);
   cam.zoom *= factor;
-  cam.zoom = Math.max(25, Math.min(260, cam.zoom));
+  cam.zoom = Math.max(MIN_CAMERA_ZOOM, Math.min(MAX_CAMERA_ZOOM, cam.zoom));
+  syncCameraTarget();
   draw3D();
 }, { passive: false });
 
@@ -2467,19 +2763,19 @@ cubeCanvas.addEventListener("mousemove", ev => {
   const rect = cubeCanvas.getBoundingClientRect();
   const x = (ev.clientX - rect.left) * (cubeCanvas.width / rect.width);
   const y = (ev.clientY - rect.top) * (cubeCanvas.height / rect.height);
-  const hit = viewCubeTargets.find(t => t.type === "corner" ? Math.hypot(x - t.x, y - t.y) <= t.r : pointInPoly(x, y, t.poly));
+  const hit = viewCubeTargets.find(t => cubeTargetContains(t, x, y));
   cubeCanvas.style.cursor = hit ? "pointer" : "default";
 });
 cubeCanvas.addEventListener("click", ev => {
   view3DHotkeysActive = true;
+  noteCameraInteraction();
   const rect = cubeCanvas.getBoundingClientRect();
   const x = (ev.clientX - rect.left) * (cubeCanvas.width / rect.width);
   const y = (ev.clientY - rect.top) * (cubeCanvas.height / rect.height);
   for (let i = viewCubeTargets.length - 1; i >= 0; i--) {
     const t = viewCubeTargets[i];
-    const hit = t.type === "corner" ? Math.hypot(x - t.x, y - t.y) <= t.r : pointInPoly(x, y, t.poly);
-    if (hit) {
-      setCameraView({ ...defaultCam, ...t.view, panX: 0, panY: 8 });
+    if (cubeTargetContains(t, x, y)) {
+      setCameraView(t.view);
       break;
     }
   }
@@ -2487,6 +2783,10 @@ cubeCanvas.addEventListener("click", ev => {
 
 pane3dEl.addEventListener("mouseenter", () => { view3DHotkeysActive = true; });
 pane3dEl.addEventListener("mouseleave", () => { view3DHotkeysActive = false; });
+idleOrbitEl.addEventListener("change", () => {
+  noteCameraInteraction();
+  if (!idleOrbitEl.checked) draw3D();
+});
 window.addEventListener("keydown", ev => {
   if (!view3DHotkeysActive) return;
   if (ev.key === "Escape") {
@@ -2560,15 +2860,11 @@ controlMinEl.addEventListener("change", applyControlPreview);
 controlMaxEl.addEventListener("change", applyControlPreview);
 controlStepEl.addEventListener("change", applyControlPreview);
 controlSliderEl.addEventListener("change", applyControlPreview);
-document.getElementById("runTests").addEventListener("click", () => {
-  const results = runOperatorTests();
-  const failed = results.filter(r => !r.ok);
-  if (failed.length) setOpStatus(`Tests: ${results.length - failed.length}/${results.length} passed. First failure: ${failed[0].name} - ${failed[0].error}`, true);
-  else setOpStatus(`Tests: all ${results.length} operator checks passed.`);
-});
 document.getElementById("resetPanes").addEventListener("click", resetPanes);
 window.addEventListener("resize", applyPaneWeights);
 
 syncViewTheme();
 refreshUI();
 applyPaneWeights();
+startPlotSelectionAnimation();
+idleOrbitHandle = requestAnimationFrame(idleOrbitStep);

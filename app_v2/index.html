@@ -10,7 +10,6 @@
 <div id="app">
   <header>
     <button type="button" id="resetPanes">Reset panes</button>
-    <button type="button" id="runTests">Run tests</button>
   </header>
 
   <main id="panes">
@@ -94,12 +93,20 @@
     <div class="gutter" data-gutter="2"></div>
 
     <section class="pane" id="pane3d">
-      <div class="title"><div class="titleText">90° alternating-segment mesh</div><button type="button" class="small" data-collapse="pane3d">hide</button></div>
+      <div class="title">
+        <div class="titleText">3D view</div>
+        <div class="titleActions">
+          <label class="idleOrbitToggle" title="Rotate the paper automatically after a few seconds without interaction">
+            <input type="checkbox" id="idleOrbit" checked>
+            <span>Idle orbit</span>
+          </label>
+          <button type="button" class="small" data-collapse="pane3d">hide</button>
+        </div>
+      </div>
       <canvas id="view3dgl"></canvas>
       <canvas id="view3d"></canvas>
-      <div class="hint3d">drag to rotate · mouse wheel to zoom · right-drag to pan · keys: F B L R T D · Esc resets</div>
-      <canvas id="viewCube" width="118" height="118" title="View cube: click faces for orthographic views, corners for isometric views"></canvas>
-      <div class="legend">paper preview</div>
+      <div class="hint3d">drag to rotate · mouse wheel to zoom · right-drag to pan · keys: F B L R T D · Esc resets · idle orbit after 15s or a large zoom change</div>
+      <canvas id="viewCube" width="96" height="96" title="View cube: click faces for orthographic views, corners for isometric views"></canvas>
     </section>
   </main>
 </div>
