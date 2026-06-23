@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Signed Strip Pop-up v2</title>
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <button type="button" id="resetPanes">Reset panes</button>
+  </header>
+
+  <main id="panes">
+    <section class="pane" id="paneData">
+      <div class="title"><div class="titleText">Variables</div><div class="titleActions"><button type="button" class="small" id="saveModel">Save</button><button type="button" class="small" id="loadModel">Load</button><button type="button" class="small" data-collapse="paneData">hide</button></div></div>
+      <div id="editorWrap">
+        <div class="detailHelp">
+          Select a variable to show it immediately in the detail, 2D, and 3D panes.
+        </div>
+        <div class="controls">
+          <button type="button" id="addVar">+</button>
+          <button type="button" id="removeVar" class="danger">-</button>
+        </div>
+        <div class="varList" id="varList"></div>
+        <div id="opStatus"></div>
+      </div>
+    </section>
+
+    <div class="gutter" data-gutter="0"></div>
+
+    <section class="pane" id="paneOps">
+      <div class="title"><div class="titleText">Detail</div><button type="button" class="small" data-collapse="paneOps">hide</button></div>
+      <div id="opsWrap">
+        <div class="detailGrid">
+          <div class="fieldGroup">
+            <label for="varKind">Kind</label>
+            <select id="varKind">
+              <option value="design">design</option>
+              <option value="control">slider</option>
+            </select>
+          </div>
+          <div class="fieldGroup">
+            <label for="varName">Name</label>
+            <input id="varName" placeholder="variable name" autocapitalize="off" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="fieldGroup">
+            <label for="varDesc">Description</label>
+            <input id="varDesc" placeholder="optional description" autocomplete="off" spellcheck="false">
+          </div>
+          <button type="button" id="apply">apply</button>
+        </div>
+        <div class="detailHelp">
+          <label for="data" class="blockLabel">Expression or JSON <span class="inlineLink">(<a id="helpLink" href="./help.html" target="_blank" rel="noopener noreferrer">function reference</a>)</span></label>
+          <span id="designHelp">Use raw JSON for a strip model, a single expression, or arbitrary JavaScript with an explicit <code>return</code>.</span>
+        </div>
+        <div id="controlFields" class="controlGrid">
+          <div class="fieldGroup">
+            <label for="controlValue">Value</label>
+            <input id="controlValue" type="number" step="any">
+          </div>
+          <div class="fieldGroup">
+            <label for="controlMin">Min</label>
+            <input id="controlMin" type="number" step="any">
+          </div>
+          <div class="fieldGroup">
+            <label for="controlMax">Max</label>
+            <input id="controlMax" type="number" step="any">
+          </div>
+          <div class="fieldGroup">
+            <label for="controlStep">Step</label>
+            <input id="controlStep" type="number" step="any">
+          </div>
+          <div class="fieldGroup controlSliderWrap">
+            <label for="controlSlider">Slider</label>
+            <input id="controlSlider" type="range">
+          </div>
+        </div>
+        <textarea id="data" spellcheck="false"></textarea>
+        <div id="status"></div>
+      </div>
+    </section>
+
+    <div class="gutter" data-gutter="1"></div>
+
+    <section class="pane" id="panePattern">
+      <div class="title"><div class="titleText">2D paper coordinates</div><button type="button" class="small" data-collapse="panePattern">hide</button></div>
+      <svg id="pattern"></svg>
+      <div class="legend"><span class="sw border"></span>board edge &nbsp;<span class="sw cut"></span>cut &nbsp;<span class="sw valley"></span>valley &nbsp;<span class="sw mountain"></span>mountain</div>
+    </section>
+
+    <div class="gutter" data-gutter="2"></div>
+
+    <section class="pane" id="pane3d">
+      <div class="title">
+        <div class="titleText">3D view</div>
+        <div class="titleActions">
+          <label class="idleOrbitToggle" title="Rotate the paper automatically after a few seconds without interaction">
+            <input type="checkbox" id="idleOrbit" checked>
+            <span>Idle orbit</span>
+          </label>
+          <button type="button" class="small" data-collapse="pane3d">hide</button>
+        </div>
+      </div>
+      <canvas id="view3dgl"></canvas>
+      <canvas id="view3d"></canvas>
+      <div class="hint3d">drag to rotate · mouse wheel to zoom · right-drag to pan · keys: F B L R T D · Esc resets · idle orbit after 15s or a large zoom change</div>
+      <canvas id="viewCube" width="96" height="96" title="View cube: click faces for orthographic views, corners for isometric views"></canvas>
+    </section>
+  </main>
+</div>
+
+<script src="./js/examples.js"></script>
+<script src="./js/app.js"></script>
+</body>
+</html>
