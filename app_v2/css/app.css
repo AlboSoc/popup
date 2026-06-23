@@ -111,7 +111,27 @@ button.small {
 .titleActions {
   display: inline-flex;
   gap: 6px;
+  align-items: center;
   pointer-events: auto;
+}
+
+.idleOrbitToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 5px;
+  background: rgba(15, 22, 30, 0.68);
+  color: #e6edf5;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.idleOrbitToggle input {
+  margin: 0;
 }
 
 .collapsed > *:not(.title) {
@@ -216,7 +236,7 @@ body[data-view-theme="dark-webgl"] #view3dgl {
 .hint3d {
   position: absolute;
   left: 9px;
-  top: 44px;
+  bottom: 9px;
   z-index: 5;
   padding: 6px 8px;
   background: rgba(255, 255, 255, 0.82);
@@ -401,12 +421,12 @@ code {
   position: absolute;
   top: 44px;
   right: 12px;
-  width: 118px;
-  height: 118px;
+  width: 96px;
+  height: 96px;
   z-index: 6;
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 12px;
+  border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
   backdrop-filter: blur(2px);
 }
@@ -418,9 +438,9 @@ body[data-view-theme="dark-webgl"] #pane3d .hint3d {
 }
 
 body[data-view-theme="dark-webgl"] #viewCube {
-  background: rgba(17, 24, 32, 0.78);
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+  background: rgba(27, 39, 51, 0.86);
+  border-color: rgba(155, 178, 199, 0.16);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
 }
 
 @media (max-width: 950px) {
