@@ -26,7 +26,7 @@ body {
 
 #menuOverlay {
   position: absolute;
-  top: 8px;
+  bottom: 8px;
   left: 8px;
   z-index: 40;
   display: flex;
@@ -113,9 +113,16 @@ button.small {
 }
 
 .titleText {
-  padding: 4px 7px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.86);
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(23, 32, 42, 0.1);
+  box-shadow: 0 3px 12px rgba(23, 32, 42, 0.08);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #213140;
 }
 
 .titleActions {
@@ -854,7 +861,8 @@ body[data-view-theme="dark-webgl"] #viewCube {
 
 @media (max-width: 950px) {
   #menuOverlay {
-    right: 8px;
+    top: auto;
+    right: auto;
     width: auto;
   }
 
