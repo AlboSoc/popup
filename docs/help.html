@@ -84,6 +84,9 @@
     <div class="card"><strong><code>repeat(a, n)</code></strong><br>Tiles a design across the page width <code>n</code> times.</div>
     <div class="card"><strong><code>concat(a, b, ...)</code></strong><br>Places compatible designs side-by-side, then normalizes any overlaps into a single positive-width design.</div>
     <div class="card"><strong><code>offset(a, before, after)</code></strong><br>Adds plain folded margin strips before and after a design. Widths may be negative, which acts as overlap sugar before final normalization.</div>
+    <div class="card"><strong><code>Paper(length, width, height)</code></strong><br>Creates a plain folded sheet whose 3D domain is <code>[0, width] x [0, height] x [0, length]</code> in <code>(x, y, z)</code>. So <code>width</code> is the established horizontal paper width from the core strip-width data, <code>height</code> is the upward 3D <code>y</code> limit for dropped boxes, and <code>length</code> is the paper extent along 3D <code>z</code>. In the 2D paper coordinates this same <code>length</code> is the popup depth parameter <code>H</code>, so the sheet runs from <code>t = 0</code> to <code>t = 2 * length</code>.</div>
+    <div class="card"><strong><code>dropBox(model, length, width, height, position)</code></strong><br>Splits the paper model as needed and adds the effect of a physical box dropped onto the popup. The box spans <code>length</code> along 3D <code>z</code>, <code>width</code> along 3D <code>x</code>, and <code>height</code> along 3D <code>y</code>. It lands flush against the <code>z = 0</code> plane, so every covered strip gets a vertical increment of <code>height</code> over the final <code>length</code> portion of that strip. Repeating the same drop stacks again, and if the current paper is too short or too low to accommodate the added height, the paper automatically grows. <code>position</code> places the box across the paper width using the shared horizontal <code>x</code> coordinate; a number means the left edge, so <code>position = p</code> covers <code>x in [p, p + width]</code>.</div>
+    <div class="card"><strong><code>dropBoxes(model, specs)</code></strong><br>Applies many dropped boxes in sequence using <code>Array.prototype.reduce</code>-style composition. Each spec may be <code>[length, width, height, position]</code> or <code>{ length|l, width|w, height|h, position|p }</code>.</div>
   </div>
 
   <h2>Expression Examples</h2>
@@ -98,6 +101,18 @@ concat(step, mirror(step))
 offset(step, [0.5, 0.5], 0.75)
 
 concat(saw, offset(mirror(saw), -2))
+
+let scene = Paper(2, 6, 1.3);
+scene = dropBox(scene, 0.8, 1.2, 0.5, 1.2);
+scene = dropBox(scene, 1.1, 1.6, 0.9, 3.0);
+scene = dropBox(scene, 0.7, 1.0, 0.4, 4.8);
+return scene;
+
+dropBoxes(Paper(2, 6, 1.3), [
+  [0.8, 1.2, 0.5, 1.2],
+  [1.1, 1.6, 0.9, 3.0],
+  { l: 0.7, w: 1.0, h: 0.4, p: 4.8 }
+])
 
 const variant = (() => {
   const out = clone(gate);

@@ -39,6 +39,7 @@
             <select id="varKind">
               <option value="design">design</option>
               <option value="control">slider</option>
+              <option value="dropboxes">dropboxes</option>
             </select>
           </div>
           <div class="fieldGroup">
@@ -77,6 +78,65 @@
             <input id="controlSlider" type="range">
           </div>
         </div>
+        <div id="dropBoxesEditor" class="dropBoxesEditor" hidden>
+          <div class="dropBoxesTop">
+            <div class="fieldGroup">
+              <label for="dropPaperLength">Paper L</label>
+              <input id="dropPaperLength" type="number" step="any" min="0.01">
+            </div>
+            <div class="fieldGroup">
+              <label for="dropPaperWidth">Paper W</label>
+              <input id="dropPaperWidth" type="number" step="any" min="0.01">
+            </div>
+            <div class="fieldGroup">
+              <label for="dropPaperHeight">Paper H</label>
+              <input id="dropPaperHeight" type="number" step="any" min="0.01">
+            </div>
+            <div class="fieldGroup">
+              <label for="dropGridStep">Grid step</label>
+              <input id="dropGridStep" type="number" step="any" min="0.01">
+            </div>
+            <label class="dropToggle" title="Snap dragging and numeric edits to the grid step">
+              <input id="dropSnap" type="checkbox" checked>
+              <span>Snap to grid</span>
+            </label>
+          </div>
+          <div class="dropBoxesBoxRow">
+            <div class="fieldGroup">
+              <label for="dropBoxPosition">Box Px</label>
+              <input id="dropBoxPosition" type="number" step="any">
+            </div>
+            <div class="fieldGroup">
+              <label for="dropBoxZ">Box Pz</label>
+              <input id="dropBoxZ" type="number" step="any" min="0">
+            </div>
+            <div class="fieldGroup">
+              <label for="dropBoxWidth">Box W</label>
+              <input id="dropBoxWidth" type="number" step="any" min="0.01">
+            </div>
+            <div class="fieldGroup">
+              <label for="dropBoxLength">Box L</label>
+              <input id="dropBoxLength" type="number" step="any" min="0.01">
+            </div>
+              <div class="fieldGroup">
+                <label for="dropBoxHeight">Box H</label>
+                <input id="dropBoxHeight" type="number" step="any">
+              </div>
+            <div class="dropBoxesButtons">
+              <button type="button" id="dropBoxNew">new box</button>
+            </div>
+          </div>
+          <canvas id="dropBoxesCanvas" width="520" height="320"></canvas>
+          <div class="dropBoxesBottom">
+            <div class="dropBoxesListWrap">
+              <div class="blockLabel">Boxes</div>
+              <div id="dropBoxesList" class="dropBoxesList"></div>
+            </div>
+            <div class="dropBoxesListActions">
+              <button type="button" id="dropBoxDelete" class="danger">delete</button>
+            </div>
+          </div>
+        </div>
         <textarea id="data" spellcheck="false"></textarea>
         <div id="status"></div>
       </div>
@@ -86,8 +146,52 @@
 
     <section class="pane" id="panePattern">
       <div class="title"><div class="titleText">2D paper coordinates</div><button type="button" class="small" data-collapse="panePattern">hide</button></div>
-      <svg id="pattern"></svg>
-      <div class="legend"><span class="sw border"></span>board edge &nbsp;<span class="sw cut"></span>cut &nbsp;<span class="sw valley"></span>valley &nbsp;<span class="sw mountain"></span>mountain</div>
+      <div class="patternViewport">
+        <svg id="pattern"></svg>
+        <div class="legend"><span class="sw border"></span>board edge &nbsp;<span class="sw cut"></span>cut &nbsp;<span class="sw valley"></span>valley &nbsp;<span class="sw mountain"></span>mountain</div>
+      </div>
+      <div class="plotterDivider" id="plotterDivider" role="separator" aria-orientation="horizontal" title="Drag to resize the plotter section"></div>
+      <details class="plotterPanel" open>
+        <summary>Plotter Output</summary>
+        <div class="plotterPanelBody">
+          <div class="plotterControls">
+            <div class="fieldGroup">
+              <label for="plotterOriginX">Origin X</label>
+              <input id="plotterOriginX" type="number" value="100" step="1">
+            </div>
+            <div class="fieldGroup">
+              <label for="plotterOriginY">Origin Y</label>
+              <input id="plotterOriginY" type="number" value="100" step="1">
+            </div>
+            <div class="fieldGroup">
+              <label for="plotterUnitsPerPaperUnit">Plotter units / paper unit</label>
+              <input id="plotterUnitsPerPaperUnit" type="number" value="1000" step="1" min="1">
+            </div>
+            <div class="fieldGroup">
+              <label for="plotterScale">Plot Scale</label>
+              <input id="plotterScale" type="number" value="1" step="0.1" min="0.01">
+            </div>
+            <label class="idleOrbitToggle plotterToggle" title="Flip the pattern vertically before sending it to the cutter">
+              <input id="plotterFlipY" type="checkbox" checked>
+              <span>Flip Y</span>
+            </label>
+          </div>
+          <div class="plotterButtons">
+            <button type="button" class="small" id="plotterConnect">Connect Serial</button>
+            <button type="button" class="small" id="plotterDisconnect">Disconnect</button>
+            <button type="button" class="small" id="plotterSendBorder">Send Edge</button>
+            <button type="button" class="small" id="plotterSendCuts">Send Cuts</button>
+            <button type="button" class="small" id="plotterSendValleys">Send Valleys</button>
+            <button type="button" class="small" id="plotterSendMountains">Send Mountains</button>
+          </div>
+          <div class="plotterMeta">
+            <div id="plotterSerialInfo">Plotter serial: not connected</div>
+            <div>Web Serial only: use a recent Chromium browser and choose the KH-720 port in the picker.</div>
+          </div>
+          <textarea id="plotterCommandPreview" readonly spellcheck="false" placeholder="Last generated cutter job"></textarea>
+          <pre id="plotterStatusLog"></pre>
+        </div>
+      </details>
     </section>
 
     <div class="gutter" data-gutter="2"></div>
@@ -97,7 +201,7 @@
         <div class="titleText">3D view</div>
         <div class="titleActions">
           <label class="idleOrbitToggle" title="Rotate the paper automatically after a few seconds without interaction">
-            <input type="checkbox" id="idleOrbit" checked>
+            <input type="checkbox" id="idleOrbit">
             <span>Idle orbit</span>
           </label>
           <button type="button" class="small" data-collapse="pane3d">hide</button>
