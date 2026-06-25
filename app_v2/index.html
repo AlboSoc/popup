@@ -8,13 +8,25 @@
 </head>
 <body>
 <div id="app">
-  <header>
+  <header id="menuOverlay">
     <button type="button" id="resetPanes">Reset panes</button>
+    <div id="paneTray" aria-label="Minimized panes"></div>
   </header>
 
   <main id="panes">
     <section class="pane" id="paneData">
-      <div class="title"><div class="titleText">Variables</div><div class="titleActions"><button type="button" class="small" id="saveModel">Save</button><button type="button" class="small" id="loadModel">Load</button><button type="button" class="small" data-collapse="paneData">hide</button></div></div>
+      <div class="title">
+        <div class="titleText">Variables</div>
+        <div class="titleActions">
+          <button type="button" class="small" id="saveModel">Save</button>
+          <button type="button" class="small" id="loadModel">Load</button>
+          <div class="paneWindowControls">
+            <button type="button" class="paneWindowButton" data-pane-action="minimize" data-pane-id="paneData" aria-label="Minimize Variables pane" title="Minimize"><span class="windowIcon iconMinimize" aria-hidden="true"></span></button>
+            <button type="button" class="paneWindowButton" data-pane-action="maximize" data-pane-id="paneData" aria-label="Maximize Variables pane" title="Maximize"><span class="windowIcon iconMaximize" aria-hidden="true"></span></button>
+            <button type="button" class="paneWindowButton" data-pane-action="close" data-pane-id="paneData" aria-label="Close Variables pane" title="Close"><span class="windowIcon iconClose" aria-hidden="true"></span></button>
+          </div>
+        </div>
+      </div>
       <div id="editorWrap">
         <div class="detailHelp">
           Select a variable to show it immediately in the detail, 2D, and 3D panes.
@@ -31,7 +43,16 @@
     <div class="gutter" data-gutter="0"></div>
 
     <section class="pane" id="paneOps">
-      <div class="title"><div class="titleText">Detail</div><button type="button" class="small" data-collapse="paneOps">hide</button></div>
+      <div class="title">
+        <div class="titleText">Detail</div>
+        <div class="titleActions">
+          <div class="paneWindowControls">
+            <button type="button" class="paneWindowButton" data-pane-action="minimize" data-pane-id="paneOps" aria-label="Minimize Detail pane" title="Minimize"><span class="windowIcon iconMinimize" aria-hidden="true"></span></button>
+            <button type="button" class="paneWindowButton" data-pane-action="maximize" data-pane-id="paneOps" aria-label="Maximize Detail pane" title="Maximize"><span class="windowIcon iconMaximize" aria-hidden="true"></span></button>
+            <button type="button" class="paneWindowButton" data-pane-action="close" data-pane-id="paneOps" aria-label="Close Detail pane" title="Close"><span class="windowIcon iconClose" aria-hidden="true"></span></button>
+          </div>
+        </div>
+      </div>
       <div id="opsWrap">
         <div class="detailGrid">
           <div class="fieldGroup">
@@ -145,7 +166,16 @@
     <div class="gutter" data-gutter="1"></div>
 
     <section class="pane" id="panePattern">
-      <div class="title"><div class="titleText">2D paper coordinates</div><button type="button" class="small" data-collapse="panePattern">hide</button></div>
+      <div class="title">
+        <div class="titleText">2D paper coordinates</div>
+        <div class="titleActions">
+          <div class="paneWindowControls">
+            <button type="button" class="paneWindowButton" data-pane-action="minimize" data-pane-id="panePattern" aria-label="Minimize 2D pane" title="Minimize"><span class="windowIcon iconMinimize" aria-hidden="true"></span></button>
+            <button type="button" class="paneWindowButton" data-pane-action="maximize" data-pane-id="panePattern" aria-label="Maximize 2D pane" title="Maximize"><span class="windowIcon iconMaximize" aria-hidden="true"></span></button>
+            <button type="button" class="paneWindowButton" data-pane-action="close" data-pane-id="panePattern" aria-label="Close 2D pane" title="Close"><span class="windowIcon iconClose" aria-hidden="true"></span></button>
+          </div>
+        </div>
+      </div>
       <div class="patternViewport">
         <svg id="pattern"></svg>
         <div class="legend"><span class="sw border"></span>board edge &nbsp;<span class="sw cut"></span>cut &nbsp;<span class="sw valley"></span>valley &nbsp;<span class="sw mountain"></span>mountain</div>
@@ -204,7 +234,11 @@
             <input type="checkbox" id="idleOrbit">
             <span>Idle orbit</span>
           </label>
-          <button type="button" class="small" data-collapse="pane3d">hide</button>
+          <div class="paneWindowControls">
+            <button type="button" class="paneWindowButton" data-pane-action="minimize" data-pane-id="pane3d" aria-label="Minimize 3D pane" title="Minimize"><span class="windowIcon iconMinimize" aria-hidden="true"></span></button>
+            <button type="button" class="paneWindowButton" data-pane-action="maximize" data-pane-id="pane3d" aria-label="Maximize 3D pane" title="Maximize"><span class="windowIcon iconMaximize" aria-hidden="true"></span></button>
+            <button type="button" class="paneWindowButton" data-pane-action="close" data-pane-id="pane3d" aria-label="Close 3D pane" title="Close"><span class="windowIcon iconClose" aria-hidden="true"></span></button>
+          </div>
         </div>
       </div>
       <canvas id="view3dgl"></canvas>
