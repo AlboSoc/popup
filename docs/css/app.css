@@ -21,18 +21,26 @@ body {
 
 #app {
   height: 100%;
-  display: grid;
-  grid-template-rows: auto 1fr;
+  position: relative;
 }
 
-header {
+#menuOverlay {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 40;
   display: flex;
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
-  background: #242424;
+  width: fit-content;
+  max-width: calc(100% - 16px);
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(36, 36, 36, 0.9);
   color: #fff;
-  padding: 7px 9px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(4px);
 }
 
 button,
@@ -56,6 +64,7 @@ button.small {
 }
 
 #panes {
+  height: 100%;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(46px, 25fr) 8px minmax(46px, 25fr) 8px minmax(46px, 25fr) 8px minmax(46px, 25fr);
@@ -67,6 +76,11 @@ button.small {
   position: relative;
   background: var(--panel);
   overflow: hidden;
+}
+
+.pane[hidden],
+.gutter[hidden] {
+  display: none !important;
 }
 
 .gutter {
@@ -104,15 +118,112 @@ button.small {
   background: rgba(255, 255, 255, 0.86);
 }
 
-.title button {
-  pointer-events: auto;
-}
-
 .titleActions {
   display: inline-flex;
   gap: 6px;
   align-items: center;
   pointer-events: auto;
+}
+
+#paneTray {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.paneTrayButton {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.12);
+  color: #f5f2ea;
+}
+
+.paneWindowControls {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.paneWindowButton {
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  display: inline-grid;
+  place-items: center;
+}
+
+.paneWindowButton + .paneWindowButton {
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.paneWindowButton:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.paneWindowButton[data-pane-action="close"]:hover {
+  background: rgba(176, 74, 45, 0.88);
+}
+
+.paneWindowButton.isActive {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.windowIcon {
+  position: relative;
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+.iconMinimize::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 2px;
+  border-top: 1.8px solid currentColor;
+}
+
+.iconMaximize::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border: 1.5px solid currentColor;
+}
+
+.paneWindowButton.isActive .iconMaximize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 3px;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid currentColor;
+  background: transparent;
+}
+
+.iconClose::before,
+.iconClose::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 0;
+  width: 1.5px;
+  height: 12px;
+  background: currentColor;
+}
+
+.iconClose::before {
+  transform: rotate(45deg);
+}
+
+.iconClose::after {
+  transform: rotate(-45deg);
 }
 
 .idleOrbitToggle {
@@ -742,6 +853,11 @@ body[data-view-theme="dark-webgl"] #viewCube {
 }
 
 @media (max-width: 950px) {
+  #menuOverlay {
+    right: 8px;
+    width: auto;
+  }
+
   .plotterControls {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

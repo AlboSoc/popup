@@ -114,6 +114,7 @@ function cameraPose(view = {}) {
 const defaultCam = cameraPose();
 
 const panes = document.getElementById("panes");
+const paneTrayEl = document.getElementById("paneTray");
 const dataEl = document.getElementById("data");
 const varNameEl = document.getElementById("varName");
 const varDescEl = document.getElementById("varDesc");
@@ -195,7 +196,17 @@ let dropBoxesPointer = null;
 let dropBoxesHitCycle = null;
 let plotterDividerDrag = null;
 let plotterPort = null;
-let paneWeights = [20, 22, 26, 32];
+const PANE_IDS = ["paneData", "paneOps", "panePattern", "pane3d"];
+const DEFAULT_PANE_WEIGHTS = [20, 22, 26, 32];
+const PANE_TITLES = {
+  paneData: "Variables",
+  paneOps: "Detail",
+  panePattern: "2D",
+  pane3d: "3D"
+};
+let paneWeights = DEFAULT_PANE_WEIGHTS.slice();
+let paneStates = Object.fromEntries(PANE_IDS.map(id => [id, "open"]));
+let maximizedPaneId = null;
 let hover3D = { active: false, x: 0, y: 0, mode: "rotate" };
 let view3DHotkeysActive = false;
 let viewCubeTargets = [];
@@ -3524,27 +3535,107 @@ function endCanvasPointer(ev) {
 
 function applyPaneWeights() {
   const isNarrow = window.matchMedia("(max-width: 950px)").matches;
-  const parts = [
-    `minmax(46px, ${paneWeights[0]}fr)`, "8px",
-    `minmax(46px, ${paneWeights[1]}fr)`, "8px",
-    `minmax(46px, ${paneWeights[2]}fr)`, "8px",
-    `minmax(46px, ${paneWeights[3]}fr)`
-  ].join(" ");
-  if (isNarrow) panes.style.gridTemplateRows = parts;
-  else panes.style.gridTemplateColumns = parts;
+  const paneEls = PANE_IDS.map(id => document.getElementById(id));
+  const gutterEls = [...document.querySelectorAll(".gutter")];
+  const openPaneIndexes = PANE_IDS.map((id, index) => paneStates[id] === "open" ? index : -1).filter(index => index >= 0);
+  if (maximizedPaneId) {
+    paneEls.forEach((pane, index) => {
+      pane.hidden = PANE_IDS[index] !== maximizedPaneId;
+      pane.classList.toggle("paneMaximized", PANE_IDS[index] === maximizedPaneId);
+    });
+    gutterEls.forEach(gutter => {
+      gutter.hidden = true;
+      delete gutter.dataset.leftPaneIndex;
+      delete gutter.dataset.rightPaneIndex;
+    });
+    panes.style.gridTemplateColumns = "1fr";
+    panes.style.gridTemplateRows = "1fr";
+    panes.dataset.maximizedPane = maximizedPaneId;
+    renderPaneChrome();
+    resize();
+    return;
+  }
+  panes.dataset.maximizedPane = "";
+  paneEls.forEach((pane, index) => {
+    pane.hidden = paneStates[PANE_IDS[index]] !== "open";
+    pane.classList.remove("paneMaximized");
+  });
+  const shownGutterLeftIndexes = new Set(openPaneIndexes.slice(0, -1));
+  gutterEls.forEach((gutter, gutterIndex) => {
+    gutter.hidden = !shownGutterLeftIndexes.has(gutterIndex);
+    if (gutter.hidden) {
+      delete gutter.dataset.leftPaneIndex;
+      delete gutter.dataset.rightPaneIndex;
+      return;
+    }
+    const visibleIndex = openPaneIndexes.indexOf(gutterIndex);
+    gutter.dataset.leftPaneIndex = String(openPaneIndexes[visibleIndex]);
+    gutter.dataset.rightPaneIndex = String(openPaneIndexes[visibleIndex + 1]);
+  });
+  if (openPaneIndexes.length === 0) {
+    panes.style.gridTemplateColumns = "";
+    panes.style.gridTemplateRows = "";
+    renderPaneChrome();
+    return;
+  }
+  const parts = [];
+  for (let i = 0; i < openPaneIndexes.length; i++) {
+    parts.push(`minmax(46px, ${paneWeights[openPaneIndexes[i]]}fr)`);
+    if (i < openPaneIndexes.length - 1) parts.push("8px");
+  }
+  if (isNarrow) {
+    panes.style.gridTemplateColumns = "1fr";
+    panes.style.gridTemplateRows = parts.join(" ");
+  } else {
+    panes.style.gridTemplateRows = "1fr";
+    panes.style.gridTemplateColumns = parts.join(" ");
+  }
+  renderPaneChrome();
   resize();
 }
 
 function resetPanes() {
-  paneWeights = [20, 22, 26, 32];
+  paneWeights = DEFAULT_PANE_WEIGHTS.slice();
+  paneStates = Object.fromEntries(PANE_IDS.map(id => [id, "open"]));
+  maximizedPaneId = null;
   cam = cameraPose(defaultCam);
   camTarget = cameraPose(defaultCam);
   stopCameraAnimation();
-  for (const id of ["paneData", "paneOps", "panePattern", "pane3d"]) {
-    const p = document.getElementById(id);
-    p.classList.remove("collapsed");
-    p.querySelector("button[data-collapse]").textContent = "hide";
+  applyPaneWeights();
+}
+
+function renderPaneChrome() {
+  if (paneTrayEl) {
+    paneTrayEl.innerHTML = "";
+    PANE_IDS
+      .filter(id => paneStates[id] === "minimized")
+      .forEach(id => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "small paneTrayButton";
+        button.textContent = PANE_TITLES[id];
+        button.dataset.restorePane = id;
+        paneTrayEl.appendChild(button);
+      });
   }
+  document.querySelectorAll(".paneWindowButton[data-pane-action=\"maximize\"]").forEach(button => {
+    button.classList.toggle("isActive", button.dataset.paneId === maximizedPaneId);
+    button.title = button.dataset.paneId === maximizedPaneId ? "Restore" : "Maximize";
+    button.setAttribute("aria-label", `${button.dataset.paneId === maximizedPaneId ? "Restore" : "Maximize"} ${PANE_TITLES[button.dataset.paneId]} pane`);
+  });
+}
+
+function setPaneState(id, nextState) {
+  if (!PANE_IDS.includes(id)) return;
+  paneStates[id] = nextState;
+  if (nextState !== "open" && maximizedPaneId === id) maximizedPaneId = null;
+  applyPaneWeights();
+}
+
+function togglePaneMaximize(id) {
+  if (!PANE_IDS.includes(id)) return;
+  if (paneStates[id] !== "open") paneStates[id] = "open";
+  maximizedPaneId = maximizedPaneId === id ? null : id;
   applyPaneWeights();
 }
 
@@ -3563,7 +3654,10 @@ function resize() {
 document.querySelectorAll(".gutter").forEach(g => {
   g.addEventListener("pointerdown", ev => {
     g.setPointerCapture(ev.pointerId);
-    dragGutter = { idx: Number(g.dataset.gutter), startX: ev.clientX, startY: ev.clientY, weights: paneWeights.slice() };
+    const leftIdx = Number(g.dataset.leftPaneIndex);
+    const rightIdx = Number(g.dataset.rightPaneIndex);
+    if (!Number.isFinite(leftIdx) || !Number.isFinite(rightIdx)) return;
+    dragGutter = { leftIdx, rightIdx, startX: ev.clientX, startY: ev.clientY, weights: paneWeights.slice() };
   });
   g.addEventListener("pointermove", ev => {
     if (!dragGutter) return;
@@ -3572,26 +3666,31 @@ document.querySelectorAll(".gutter").forEach(g => {
     const rect = panes.getBoundingClientRect();
     const totalPixels = isNarrow ? rect.height : rect.width;
     const deltaFr = delta / Math.max(1, totalPixels) * sum(dragGutter.weights);
-    const i = dragGutter.idx;
+    const i = dragGutter.leftIdx;
+    const j = dragGutter.rightIdx;
     paneWeights = dragGutter.weights.slice();
     paneWeights[i] = Math.max(5, dragGutter.weights[i] + deltaFr);
-    paneWeights[i + 1] = Math.max(5, dragGutter.weights[i + 1] - deltaFr);
+    paneWeights[j] = Math.max(5, dragGutter.weights[j] - deltaFr);
     applyPaneWeights();
   });
   g.addEventListener("pointerup", () => { dragGutter = null; });
   g.addEventListener("pointercancel", () => { dragGutter = null; });
 });
 
-document.querySelectorAll("button[data-collapse]").forEach(b => b.addEventListener("click", () => {
-  const id = b.dataset.collapse;
-  const idx = ["paneData", "paneOps", "panePattern", "pane3d"].indexOf(id);
-  const pane = document.getElementById(id);
-  const collapsed = !pane.classList.contains("collapsed");
-  pane.classList.toggle("collapsed", collapsed);
-  b.textContent = collapsed ? "show" : "hide";
-  paneWeights[idx] = collapsed ? 5 : [20, 22, 26, 32][idx];
-  applyPaneWeights();
-}));
+document.addEventListener("click", ev => {
+  const actionButton = ev.target.closest("[data-pane-action]");
+  if (actionButton) {
+    const { paneAction, paneId } = actionButton.dataset;
+    if (paneAction === "minimize") setPaneState(paneId, "minimized");
+    if (paneAction === "maximize") togglePaneMaximize(paneId);
+    if (paneAction === "close") setPaneState(paneId, "closed");
+    return;
+  }
+  const restoreButton = ev.target.closest("[data-restore-pane]");
+  if (restoreButton) {
+    setPaneState(restoreButton.dataset.restorePane, "open");
+  }
+});
 
 canvas.addEventListener("contextmenu", ev => ev.preventDefault());
 canvas.addEventListener("mouseenter", () => { view3DHotkeysActive = true; });
