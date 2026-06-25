@@ -39,6 +39,7 @@ const IDLE_BODY_SPIN_BASE_SPEED = 0.00008;
 const IDLE_BODY_SPIN_SPEED_SWELL = 0.0019;
 const MIN_CAMERA_ZOOM = 24;
 const MAX_CAMERA_ZOOM = 360;
+const WHEEL_ZOOM_ANIMATION_MS = 220;
 
 function quatNormalize(q) {
   const m = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
@@ -123,10 +124,42 @@ const controlMinEl = document.getElementById("controlMin");
 const controlMaxEl = document.getElementById("controlMax");
 const controlStepEl = document.getElementById("controlStep");
 const controlSliderEl = document.getElementById("controlSlider");
+const dropBoxesEditorEl = document.getElementById("dropBoxesEditor");
+const dropPaperLengthEl = document.getElementById("dropPaperLength");
+const dropPaperWidthEl = document.getElementById("dropPaperWidth");
+const dropPaperHeightEl = document.getElementById("dropPaperHeight");
+const dropGridStepEl = document.getElementById("dropGridStep");
+const dropSnapEl = document.getElementById("dropSnap");
+const dropBoxesCanvasEl = document.getElementById("dropBoxesCanvas");
+const dropBoxPositionEl = document.getElementById("dropBoxPosition");
+const dropBoxZEl = document.getElementById("dropBoxZ");
+const dropBoxWidthEl = document.getElementById("dropBoxWidth");
+const dropBoxLengthEl = document.getElementById("dropBoxLength");
+const dropBoxHeightEl = document.getElementById("dropBoxHeight");
+const dropBoxNewEl = document.getElementById("dropBoxNew");
+const dropBoxDeleteEl = document.getElementById("dropBoxDelete");
+const dropBoxesListEl = document.getElementById("dropBoxesList");
 const statusEl = document.getElementById("status");
 const opStatusEl = document.getElementById("opStatus");
 const varListEl = document.getElementById("varList");
 const pattern = document.getElementById("pattern");
+const plotterOriginXEl = document.getElementById("plotterOriginX");
+const plotterOriginYEl = document.getElementById("plotterOriginY");
+const plotterUnitsPerPaperUnitEl = document.getElementById("plotterUnitsPerPaperUnit");
+const plotterScaleEl = document.getElementById("plotterScale");
+const plotterFlipYEl = document.getElementById("plotterFlipY");
+const plotterConnectEl = document.getElementById("plotterConnect");
+const plotterDisconnectEl = document.getElementById("plotterDisconnect");
+const plotterSendBorderEl = document.getElementById("plotterSendBorder");
+const plotterSendCutsEl = document.getElementById("plotterSendCuts");
+const plotterSendValleysEl = document.getElementById("plotterSendValleys");
+const plotterSendMountainsEl = document.getElementById("plotterSendMountains");
+const plotterCommandPreviewEl = document.getElementById("plotterCommandPreview");
+const plotterStatusLogEl = document.getElementById("plotterStatusLog");
+const plotterSerialInfoEl = document.getElementById("plotterSerialInfo");
+const plotterPanelEl = document.querySelector("#panePattern .plotterPanel");
+const plotterDividerEl = document.getElementById("plotterDivider");
+const panePatternEl = document.getElementById("panePattern");
 const canvas = document.getElementById("view3d");
 const glCanvas = document.getElementById("view3dgl");
 const ctx = canvas.getContext("2d");
@@ -151,6 +184,17 @@ let idleOrbitLastTime = 0;
 let idleOrbitActive = false;
 let idleOrbitStartedAt = 0;
 let idleOrbitAxis = vecNorm(IDLE_SPIN_AXIS);
+let latestPatternGeometry = null;
+let latestPatternSignature = "";
+let patternView = null;
+let patternViewAutoFit = true;
+let patternPointer = null;
+let dropBoxesView = null;
+let dropBoxesViewAutoFit = true;
+let dropBoxesPointer = null;
+let dropBoxesHitCycle = null;
+let plotterDividerDrag = null;
+let plotterPort = null;
 let paneWeights = [20, 22, 26, 32];
 let hover3D = { active: false, x: 0, y: 0, mode: "rotate" };
 let view3DHotkeysActive = false;
@@ -194,11 +238,15 @@ function currentDesign() {
 }
 
 function isDesignVar(v) {
-  return (v.kind || "design") === "design";
+  return (v.kind || "design") !== "control";
 }
 
 function isControlVar(v) {
   return (v.kind || "design") === "control";
+}
+
+function isDropBoxesVar(v) {
+  return (v.kind || "design") === "dropboxes";
 }
 
 function defaultControlSpec() {
@@ -218,6 +266,89 @@ function sanitizeControl(control = {}) {
 function makeControlVar(name, description, control = defaultControlSpec()) {
   const spec = sanitizeControl(control);
   return { kind: "control", name, description, source: "", control: spec, value: spec.value };
+}
+
+function defaultDropBoxesSpec(base = {}) {
+  const paper = base.paper || {};
+  const length = Number.isFinite(Number(paper.length)) && Number(paper.length) > 0 ? Number(paper.length) : 15;
+  const width = Number.isFinite(Number(paper.width)) && Number(paper.width) > 0 ? Number(paper.width) : 15;
+  const heightRaw = Number.isFinite(Number(paper.height)) && Number(paper.height) > 0 ? Number(paper.height) : length;
+  const height = Math.min(length, heightRaw);
+  const draft = base.draft || {};
+  const defaultDraft = {
+    length: Number.isFinite(Number(draft.length)) && Number(draft.length) > 0 ? Number(draft.length) : 1,
+    width: Number.isFinite(Number(draft.width)) && Number(draft.width) > 0 ? Number(draft.width) : 1,
+    height: Number.isFinite(Number(draft.height)) ? Number(draft.height) : 1,
+    position: Number.isFinite(Number(draft.position)) ? Number(draft.position) : 1,
+    z: Number.isFinite(Number(draft.z ?? draft.z0 ?? draft.pz)) ? Number(draft.z ?? draft.z0 ?? draft.pz) : 1
+  };
+  const boxes = Array.isArray(base.boxes) && base.boxes.length ? base.boxes : [defaultDraft];
+  return {
+    paper: { length, width, height },
+    boxes,
+    selectedIndex: Number.isInteger(base.selectedIndex) ? base.selectedIndex : 0,
+    draft: defaultDraft,
+    snap: base.snap !== false,
+    gridStep: Number.isFinite(Number(base.gridStep)) && Number(base.gridStep) > 0 ? Number(base.gridStep) : 1
+  };
+}
+
+function sanitizeDropBoxItem(spec = {}, paperWidth = 3, paperLength = null, minExtent = 0.01) {
+  const floor = Math.max(0.01, Number(minExtent) || 0.01);
+  const length = Math.max(floor, Number.isFinite(Number(spec.length ?? spec.l)) ? Number(spec.length ?? spec.l) : 1);
+  const width = Math.max(floor, Number.isFinite(Number(spec.width ?? spec.w)) ? Number(spec.width ?? spec.w) : 1);
+  const height = Number.isFinite(Number(spec.height ?? spec.h)) ? Number(spec.height ?? spec.h) : 1;
+  const position = Number.isFinite(Number(spec.position ?? spec.p)) ? Number(spec.position ?? spec.p) : 0;
+  const z = Number.isFinite(Number(spec.z ?? spec.z0 ?? spec.pz)) ? Number(spec.z ?? spec.z0 ?? spec.pz) : 0;
+  const clampedWidth = Math.min(width, Math.max(floor, paperWidth));
+  const clampedPosition = Math.max(0, Math.min(paperWidth - clampedWidth, position));
+  const effectivePaperLength = Number.isFinite(Number(paperLength)) ? Math.max(floor, Number(paperLength)) : null;
+  const clampedLength = effectivePaperLength == null ? length : Math.min(length, effectivePaperLength);
+  const clampedZ = effectivePaperLength == null
+    ? Math.max(0, z)
+    : Math.max(0, Math.min(effectivePaperLength - clampedLength, z));
+  return { length: clampedLength, width: clampedWidth, height, position: clampedPosition, z: clampedZ };
+}
+
+function dropBoxesSpecFromDesign(design) {
+  const { W, H } = paperParams(design);
+  return defaultDropBoxesSpec({ paper: { length: H, width: W, height: H } });
+}
+
+function sanitizeDropBoxesSpec(spec = {}) {
+  const base = defaultDropBoxesSpec(spec);
+  const minExtent = base.snap !== false
+    ? Math.max(0.01, Number(base.gridStep) || 1)
+    : 0.01;
+  const paper = {
+    length: Math.max(0.01, Number(base.paper.length)),
+    width: Math.max(0.01, Number(base.paper.width)),
+    height: Math.max(0.01, Math.min(Number(base.paper.height), Number(base.paper.length)))
+  };
+  const boxes = base.boxes.map(box => sanitizeDropBoxItem(box, paper.width, paper.length, minExtent));
+  let selectedIndex = Number.isInteger(base.selectedIndex) ? base.selectedIndex : -1;
+  if (selectedIndex < 0 || selectedIndex >= boxes.length) selectedIndex = -1;
+  const draftSeed = selectedIndex >= 0 ? boxes[selectedIndex] : base.draft;
+  const draft = sanitizeDropBoxItem(draftSeed, paper.width, paper.length, minExtent);
+  return {
+    paper,
+    boxes,
+    selectedIndex,
+    draft,
+    snap: !!base.snap,
+    gridStep: Math.max(0.01, Number(base.gridStep))
+  };
+}
+
+function formatDropBoxesNumber(value) {
+  return String(clean(Number(value)));
+}
+
+function dropBoxesSource(spec = {}) {
+  const normalized = sanitizeDropBoxesSpec(spec);
+  const paper = normalized.paper;
+  const lines = normalized.boxes.map(box => `  [${formatDropBoxesNumber(box.z)}, ${formatDropBoxesNumber(box.z + box.length)}, ${formatDropBoxesNumber(box.width)}, ${formatDropBoxesNumber(box.height)}, ${formatDropBoxesNumber(box.position)}]`);
+  return `return applyBoxes(\n  Paper(${formatDropBoxesNumber(paper.length)}, ${formatDropBoxesNumber(paper.width)}, ${formatDropBoxesNumber(paper.height)}), [\n${lines.join(",\n")}\n  ]\n);`;
 }
 
 function findFirstDesignIndex(start = 0) {
@@ -333,18 +464,22 @@ function canonicalizeStrip(strip) {
 
 function normalizeDesign(design) {
   if (!isDesignShape(design)) return design;
-  return {
+  const out = {
     widths: design.widths.map(clean),
     strips: design.strips.map(canonicalizeStrip)
   };
+  if (design._popupPaper) out._popupPaper = { ...design._popupPaper };
+  return out;
 }
 
 function canonicalizeSugaredDesign(design) {
   if (!isDesignShape(design)) return design;
-  return {
+  const out = {
     widths: design.widths.map(clean),
     strips: design.strips.map(canonicalizeStrip)
   };
+  if (design._popupPaper) out._popupPaper = { ...design._popupPaper };
+  return out;
 }
 
 function validateSugaredDesign(design) {
@@ -412,6 +547,7 @@ function normalizeSugaredDesign(design) {
     out.strips.push(covering.length ? mergeStripsMax(covering, H) : canonicalizeStrip([clean(H), clean(H)]));
   }
   const normalized = normalizeDesign(out);
+  if (sugared._popupPaper) normalized._popupPaper = { ...sugared._popupPaper };
   const normalizedErr = validate(normalized);
   if (normalizedErr) throw Error(normalizedErr);
   return normalized;
@@ -583,6 +719,319 @@ function foldedDesign(widths, H) {
     widths: widths.map(clean),
     strips: widths.map(() => [clean(H), clean(H)])
   });
+}
+
+function Paper(length, width, height = length) {
+  const paperLength = clean(Number(length));
+  const paperWidth = clean(Number(width));
+  const maxHeight = clean(Number(height));
+  if (!Number.isFinite(paperLength) || paperLength <= 0) throw Error("Paper(length, width, height) needs length > 0.");
+  if (!Number.isFinite(paperWidth) || paperWidth <= 0) throw Error("Paper(length, width, height) needs width > 0.");
+  if (!Number.isFinite(maxHeight) || maxHeight <= 0) throw Error("Paper(length, width, height) needs height > 0.");
+  if (maxHeight > paperLength + 1e-9) throw Error("Paper(...) height cannot exceed length in this model.");
+  const design = foldedDesign([paperWidth], paperLength);
+  design._popupPaper = { length: paperLength, width: paperWidth, height: maxHeight };
+  return design;
+}
+
+function totalDesignWidth(design) {
+  return clean(sum(normalizeSugaredDesign(design).widths));
+}
+
+function remapStripToLength(strip, oldH, newH) {
+  if (newH <= oldH + 1e-9) return strip.slice();
+  const delta = clean(newH - oldH);
+  const set = new Set([0, newH]);
+  for (const p of stripBreakpoints(strip)) set.add(clean(p.u + delta));
+  const us = [...set].filter(x => x >= -1e-9 && x <= newH + 1e-9).sort((a, b) => a - b);
+  const out = [];
+  function pushHorizontal(length) {
+    const value = clean(length);
+    if (value <= 0) return;
+    if (!out.length) {
+      out.push(value);
+      return;
+    }
+    if (out.length % 2 === 1) out[out.length - 1] = clean(out[out.length - 1] + value);
+    else out.push(value);
+  }
+  function pushVertical(length) {
+    const value = clean(length);
+    if (value <= 0) return;
+    if (!out.length) out.push(0);
+    if (out.length % 2 === 0) out[out.length - 1] = clean(out[out.length - 1] + value);
+    else out.push(value);
+  }
+  let currentY = 0;
+  for (let i = 0; i < us.length - 1; i++) {
+    const u = us[i];
+    const nextU = us[i + 1];
+    const sourceU = clean(Math.max(0, u - delta));
+    let targetY = u < delta - 1e-9 ? 0 : clamp01Height(yAt(strip, sourceU), oldH);
+    if (targetY < currentY) targetY = currentY;
+    if (targetY > currentY + 1e-9) pushVertical(targetY - currentY);
+    currentY = targetY;
+    if (nextU > u + 1e-9) pushHorizontal(nextU - u);
+  }
+  if (currentY < newH - 1e-9) pushVertical(newH - currentY);
+  return canonicalizeStrip(out);
+}
+
+function growDesignCapacity(design, minLength, minHeight = minLength) {
+  const normalized = normalizeSugaredDesign(design);
+  const oldH = hsum(normalized.strips[0]);
+  const targetLength = clean(Math.max(oldH, Number(minLength) || 0));
+  const currentHeight = normalized._popupPaper ? normalized._popupPaper.height : oldH;
+  const targetHeight = clean(Math.max(currentHeight, Number(minHeight) || 0));
+  if (targetLength <= oldH + 1e-9 && targetHeight <= currentHeight + 1e-9) return normalized;
+  const grown = {
+    widths: normalized.widths.map(clean),
+    strips: normalized.strips.map(strip => remapStripToLength(strip, oldH, targetLength))
+  };
+  if (normalized._popupPaper) {
+    grown._popupPaper = {
+      ...normalized._popupPaper,
+      length: targetLength,
+      height: targetHeight
+    };
+  }
+  const out = normalizeDesign(grown);
+  if (grown._popupPaper) out._popupPaper = { ...grown._popupPaper };
+  return out;
+}
+
+function refineDesignWidths(design, boundaries = []) {
+  const normalized = normalizeSugaredDesign(design);
+  const totalW = totalDesignWidth(normalized);
+  const xs = [0];
+  for (const w of normalized.widths) xs.push(clean(xs[xs.length - 1] + w));
+  const cuts = xs.slice();
+  for (const boundary of boundaries) {
+    const x = clean(Number(boundary));
+    if (Number.isFinite(x) && x > 1e-9 && x < totalW - 1e-9) cuts.push(x);
+  }
+  cuts.sort((a, b) => a - b);
+  const uniqueCuts = [];
+  for (const x of cuts) {
+    if (!uniqueCuts.length || Math.abs(x - uniqueCuts[uniqueCuts.length - 1]) > 1e-9) uniqueCuts.push(x);
+  }
+  const widths = [];
+  const strips = [];
+  let stripIndex = 0;
+  for (let i = 0; i < uniqueCuts.length - 1; i++) {
+    const x0 = uniqueCuts[i];
+    const x1 = uniqueCuts[i + 1];
+    if (x1 <= x0 + 1e-9) continue;
+    const mid = clean((x0 + x1) / 2);
+    while (stripIndex < xs.length - 2 && mid > xs[stripIndex + 1] - 1e-9) stripIndex++;
+    widths.push(clean(x1 - x0));
+    strips.push(normalized.strips[Math.min(stripIndex, normalized.strips.length - 1)].slice());
+  }
+  const refined = normalizeDesign({ widths, strips });
+  if (normalized._popupPaper) refined._popupPaper = { ...normalized._popupPaper };
+  return refined;
+}
+
+function resolveDropBoxPosition(position, boxWidth, totalWidth) {
+  if (position == null) return { x0: clean((totalWidth - boxWidth) / 2), x1: clean((totalWidth + boxWidth) / 2) };
+  if (Number.isFinite(Number(position))) {
+    const left = clean(Number(position));
+    return { x0: left, x1: clean(left + boxWidth) };
+  }
+  if (typeof position === "object") {
+    if (Number.isFinite(Number(position.left))) {
+      const left = clean(Number(position.left));
+      return { x0: left, x1: clean(left + boxWidth) };
+    }
+    const anchor = Number.isFinite(Number(position.x)) ? clean(Number(position.x))
+      : Number.isFinite(Number(position.center)) ? clean(Number(position.center))
+        : clean(totalWidth / 2);
+    const align = String(position.align || (Number.isFinite(Number(position.left)) ? "left" : "center")).toLowerCase();
+    if (align === "left") return { x0: anchor, x1: clean(anchor + boxWidth) };
+    if (align === "right") return { x0: clean(anchor - boxWidth), x1: anchor };
+    return { x0: clean(anchor - boxWidth / 2), x1: clean(anchor + boxWidth / 2) };
+  }
+  throw Error("dropBox(..., position) needs a number or { left|x|center, align } object.");
+}
+
+function editStripByBoxInterval(strip, H, u0, u1, delta) {
+  const start = clean(Math.max(0, Math.min(H, u0)));
+  const end = clean(Math.max(0, Math.min(H, u1)));
+  if (end <= start + 1e-9 || Math.abs(delta) <= 1e-9) return strip.slice();
+  const set = new Set([0, H, start, end]);
+  for (const p of stripBreakpoints(strip)) set.add(clean(p.u));
+  const us = [...set].filter(x => x >= -1e-9 && x <= H + 1e-9).sort((a, b) => a - b);
+  const targets = [];
+  for (let i = 0; i < us.length - 1; i++) {
+    const left = us[i];
+    let targetY = yAt(strip, left);
+    if (left >= start - 1e-9 && left < end - 1e-9) {
+      targetY = clamp01Height(targetY + delta, H);
+    }
+    targets.push(clean(targetY));
+  }
+  const adjusted = targets.slice();
+  if (delta >= 0) {
+    let currentY = 0;
+    for (let i = 0; i < adjusted.length; i++) {
+      currentY = Math.max(currentY, adjusted[i]);
+      adjusted[i] = clean(currentY);
+    }
+  } else {
+    let nextY = H;
+    for (let i = adjusted.length - 1; i >= 0; i--) {
+      nextY = Math.min(nextY, adjusted[i]);
+      adjusted[i] = clean(nextY);
+    }
+  }
+  const out = [];
+  function pushHorizontal(length) {
+    const value = clean(length);
+    if (value <= 0) return;
+    if (!out.length) {
+      out.push(value);
+      return;
+    }
+    if (out.length % 2 === 1) out[out.length - 1] = clean(out[out.length - 1] + value);
+    else out.push(value);
+  }
+  function pushVertical(length) {
+    const value = clean(length);
+    if (value <= 0) return;
+    if (!out.length) out.push(0);
+    if (out.length % 2 === 0) out[out.length - 1] = clean(out[out.length - 1] + value);
+    else out.push(value);
+  }
+  let currentY = 0;
+  for (let i = 0; i < us.length - 1; i++) {
+    const right = us[i + 1];
+    const targetY = adjusted[i];
+    if (targetY > currentY + 1e-9) pushVertical(targetY - currentY);
+    currentY = targetY;
+    if (right > us[i] + 1e-9) pushHorizontal(right - us[i]);
+  }
+  if (currentY < H - 1e-9) pushVertical(H - currentY);
+  return canonicalizeStrip(out);
+}
+
+function applyBox(model, z0, z1, width, height, position = null) {
+  if (!isDesignShape(model)) throw Error("applyBox(model, ...) needs a design as its first argument.");
+  let startZ = z0;
+  let endZ = z1;
+  let boxWidth = width;
+  let boxHeight = height;
+  let boxPosition = position;
+  if (z0 && typeof z0 === "object" && !Array.isArray(z0)) {
+    const spec = z0;
+    startZ = spec.z0 ?? spec.from ?? spec.start;
+    endZ = spec.z1 ?? spec.to ?? spec.end;
+    boxWidth = spec.width ?? spec.w;
+    boxHeight = spec.height ?? spec.h;
+    boxPosition = spec.position ?? spec.p ?? null;
+  }
+  const base = normalizeSugaredDesign(model);
+  const aRaw = clean(Number(startZ));
+  const bRaw = clean(Number(endZ));
+  boxWidth = clean(Number(boxWidth));
+  boxHeight = clean(Number(boxHeight));
+  if (!Number.isFinite(aRaw) || !Number.isFinite(bRaw)) throw Error("applyBox(..., z0, z1, ...) needs finite z coordinates.");
+  if (aRaw < -1e-9 || bRaw < -1e-9) throw Error("applyBox(..., z0, z1, ...) needs z0, z1 >= 0.");
+  if (!Number.isFinite(boxWidth) || boxWidth <= 0) throw Error("applyBox(..., ..., ..., width, ...) needs width > 0.");
+  if (!Number.isFinite(boxHeight)) throw Error("applyBox(..., ..., ..., ..., height, ...) needs a finite height.");
+  if (Math.abs(boxHeight) <= 1e-9) return base;
+  const a = clean(Math.min(aRaw, bRaw));
+  const b = clean(Math.max(aRaw, bRaw));
+  if (b <= a + 1e-9) return base;
+  const totalW = totalDesignWidth(base);
+  const H = hsum(base.strips[0]);
+  if (boxWidth > totalW + 1e-9) throw Error("applyBox(...) box width exceeds the paper width.");
+  const { x0, x1 } = resolveDropBoxPosition(boxPosition, boxWidth, totalW);
+  if (x0 < -1e-9 || x1 > totalW + 1e-9) throw Error("applyBox(...) box footprint lies outside the paper width.");
+  const refined = refineDesignWidths(base, [x0, x1]);
+  let working = refined;
+  let workingH = H;
+  if (boxHeight > 0) {
+    const currentHeightLimit = base._popupPaper ? base._popupPaper.height : H;
+    if (b > workingH + 1e-9) {
+      working = growDesignCapacity(working, b, currentHeightLimit);
+      workingH = hsum(working.strips[0]);
+    }
+    const coverStart = clean(Math.max(0, workingH - b));
+    let supportHeight = 0;
+    const xs = [0];
+    for (const w of working.widths) xs.push(clean(xs[xs.length - 1] + w));
+    for (let i = 0; i < working.strips.length; i++) {
+      const cx = clean((xs[i] + xs[i + 1]) / 2);
+      if (cx < x0 - 1e-9 || cx > x1 + 1e-9) continue;
+      supportHeight = Math.max(supportHeight, yAt(working.strips[i], coverStart));
+    }
+    const targetLength = clean(Math.max(workingH, b, supportHeight + boxHeight));
+    const targetHeightLimit = clean(Math.max(currentHeightLimit, supportHeight + boxHeight));
+    if (targetLength > workingH + 1e-9 || targetHeightLimit > currentHeightLimit + 1e-9) {
+      working = growDesignCapacity(working, targetLength, targetHeightLimit);
+      workingH = hsum(working.strips[0]);
+    }
+  }
+  const clippedA = clean(Math.max(0, Math.min(workingH, a)));
+  const clippedB = clean(Math.max(0, Math.min(workingH, b)));
+  const u0 = clean(workingH - clippedB);
+  const u1 = clean(workingH - clippedA);
+  if (u1 <= u0 + 1e-9) return working;
+  const xs = [0];
+  for (const w of working.widths) xs.push(clean(xs[xs.length - 1] + w));
+  const out = {
+    widths: working.widths.map(clean),
+    strips: working.strips.map((strip, i) => {
+      const cx = clean((xs[i] + xs[i + 1]) / 2);
+      if (cx < x0 - 1e-9 || cx > x1 + 1e-9) return strip.slice();
+      return editStripByBoxInterval(strip, workingH, u0, u1, boxHeight);
+    })
+  };
+  const normalized = normalizeDesign(out);
+  if (working._popupPaper) normalized._popupPaper = { ...working._popupPaper };
+  const err = validate(normalized);
+  if (err) throw Error(`applyBox produced invalid result: ${err}`);
+  return normalized;
+}
+
+function dropBox(model, length, width, height, position = null) {
+  const boxLength = clean(Number(length));
+  if (!Number.isFinite(boxLength) || boxLength <= 0) throw Error("dropBox(..., length, ...) needs length > 0.");
+  return applyBox(model, 0, boxLength, width, height, position);
+}
+
+function applyBoxes(model, specs = []) {
+  if (!isDesignShape(model)) throw Error("applyBoxes(model, specs) needs a design as its first argument.");
+  if (!Array.isArray(specs)) throw Error("applyBoxes(model, specs) needs an array of box specs.");
+  return specs.reduce((acc, spec, index) => {
+    if (Array.isArray(spec)) {
+      const [z0, z1, width, height, position = null] = spec;
+      return applyBox(acc, z0, z1, width, height, position);
+    }
+    if (spec && typeof spec === "object") {
+      return applyBox(acc, spec);
+    }
+    throw Error(`applyBoxes(...): box spec ${index} must be [z0, z1, width, height, position?] or an object spec.`);
+  }, model);
+}
+
+function dropBoxes(model, specs = []) {
+  if (!isDesignShape(model)) throw Error("dropBoxes(model, specs) needs a design as its first argument.");
+  if (!Array.isArray(specs)) throw Error("dropBoxes(model, specs) needs an array of box specs.");
+  return specs.reduce((acc, spec, index) => {
+    if (Array.isArray(spec)) {
+      const [length, width, height, position = null] = spec;
+      return dropBox(acc, length, width, height, position);
+    }
+    if (spec && typeof spec === "object") {
+      const length = spec.length ?? spec.l;
+      const width = spec.width ?? spec.w;
+      const height = spec.height ?? spec.h;
+      const position = spec.position ?? spec.p ?? null;
+      return dropBox(acc, length, width, height, position);
+    }
+    throw Error(`dropBoxes(...): box spec ${index} must be [length, width, height, position?] or { length|l, width|w, height|h, position|p }.`);
+  }, model);
 }
 
 function plateauDesign(widths, H, x0, x1, u0, level) {
@@ -1205,7 +1654,7 @@ function progressiveSubdividedRidge(options = {}) {
 function buildEvalContext() {
   const ctx = {
     max, min, add, sub, intersection, union, blend, clamp, mirror, pad, repeat, concat, offset,
-    foldedDesign, plateauDesign, recursiveCornerCubes,
+    foldedDesign, plateauDesign, Paper, applyBox, applyBoxes, dropBox, dropBoxes, dropBoxesSource, recursiveCornerCubes,
     stripsFromHeightfield, subdivisionGrid, sampledSurface, offsetSampledSurface, interleavedSampledSurface,
     subdividedSurface, progressiveSubdividedSurface,
     sampledSphere, sampledCone,
@@ -1238,6 +1687,12 @@ window.POPUP_TEST_API = {
   repeat,
   concat,
   offset,
+  Paper,
+  applyBox,
+  applyBoxes,
+  dropBox,
+  dropBoxes,
+  dropBoxesSource,
   recursiveCornerCubes,
   sampledSphere,
   subdividedSphere,
@@ -1286,9 +1741,39 @@ function evaluateSource(source) {
   return result;
 }
 
+function materializeDropBoxesVar(name, description, spec) {
+  let normalized = sanitizeDropBoxesSpec(spec);
+  let source = dropBoxesSource(normalized);
+  let value = evaluateSource(source);
+  if (value && value._popupPaper) {
+    const grownPaper = {
+      length: Number(value._popupPaper.length),
+      width: Number(value._popupPaper.width),
+      height: Number(value._popupPaper.height)
+    };
+    const paperChanged = Math.abs(grownPaper.length - normalized.paper.length) > 1e-6
+      || Math.abs(grownPaper.width - normalized.paper.width) > 1e-6
+      || Math.abs(grownPaper.height - normalized.paper.height) > 1e-6;
+    if (paperChanged) {
+      normalized = sanitizeDropBoxesSpec({ ...normalized, paper: grownPaper });
+      source = dropBoxesSource(normalized);
+      value = evaluateSource(source);
+    }
+  }
+  return { kind: "dropboxes", name, description, source, dropboxes: normalized, value };
+}
+
 function makeVar(name, description, source) {
   try {
     return { kind: "design", name, description, source, value: evaluateSource(source) };
+  } catch (err) {
+    throw Error(`${name}: ${err.message}`);
+  }
+}
+
+function makeDropBoxesVar(name, description, spec = defaultDropBoxesSpec()) {
+  try {
+    return materializeDropBoxesVar(name, description, spec);
   } catch (err) {
     throw Error(`${name}: ${err.message}`);
   }
@@ -1301,13 +1786,265 @@ function modelPayload() {
       name: v.name,
       description: v.description,
       source: v.source,
-      control: v.control
+      control: v.control,
+      dropboxes: v.dropboxes
     }))
   };
 }
 
 function serializeModel(prettyPrint = true) {
   return JSON.stringify(modelPayload(), null, prettyPrint ? 2 : 0);
+}
+
+function currentDropBoxesVar() {
+  return isDropBoxesVar(vars[selected]) ? vars[selected] : null;
+}
+
+function snapDropBoxesValue(value, state) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  if (!state.snap) return n;
+  const step = Math.max(0.01, Number(state.gridStep) || 0.25);
+  return clean(Math.round(n / step) * step);
+}
+
+function dropBoxesMinExtent(state) {
+  return state && state.snap
+    ? Math.max(0.01, Number(state.gridStep) || 0.25)
+    : 0.01;
+}
+
+function makeDropBoxesDefaultDraft(state) {
+  return sanitizeDropBoxItem({
+    length: 1,
+    width: 1,
+    height: 1,
+    position: 1,
+    z: 1
+  }, state.paper.width, state.paper.length, dropBoxesMinExtent(state));
+}
+
+function fitDropBoxesView(state) {
+  dropBoxesView = {
+    x: 0,
+    y: 0,
+    width: Math.max(1, state.paper.width),
+    height: Math.max(1, state.paper.length)
+  };
+}
+
+function dropBoxesCanvasLayout(state) {
+  const rect = dropBoxesCanvasEl.getBoundingClientRect();
+  const width = Math.max(260, Math.round(rect.width || dropBoxesCanvasEl.width || 520));
+  const height = Math.max(220, Math.round(rect.height || dropBoxesCanvasEl.height || 320));
+  const dpr = window.devicePixelRatio || 1;
+  if (dropBoxesCanvasEl.width !== Math.round(width * dpr) || dropBoxesCanvasEl.height !== Math.round(height * dpr)) {
+    dropBoxesCanvasEl.width = Math.round(width * dpr);
+    dropBoxesCanvasEl.height = Math.round(height * dpr);
+  }
+  const margin = { left: 36, right: 18, top: 16, bottom: 28 };
+  const paperW = Math.max(0.01, state.paper.width);
+  const paperL = Math.max(0.01, state.paper.length);
+  if (!dropBoxesView || dropBoxesViewAutoFit) {
+    fitDropBoxesView(state);
+    dropBoxesViewAutoFit = false;
+  }
+  const view = {
+    x: dropBoxesView.x,
+    y: dropBoxesView.y,
+    width: Math.max(1, dropBoxesView.width),
+    height: Math.max(1, dropBoxesView.height)
+  };
+  const scale = Math.min((width - margin.left - margin.right) / view.width, (height - margin.top - margin.bottom) / view.height);
+  const drawW = view.width * scale;
+  const drawL = view.height * scale;
+  const x = Math.round(margin.left + ((width - margin.left - margin.right) - drawW) / 2);
+  const y = Math.round(margin.top + ((height - margin.top - margin.bottom) - drawL) / 2);
+  return { width, height, dpr, x, y, scale, paperW, paperL, view };
+}
+
+function canvasPointToDropBoxes(layout, clientX, clientY) {
+  const rect = dropBoxesCanvasEl.getBoundingClientRect();
+  const px = clientX - rect.left;
+  const py = clientY - rect.top;
+  const x = clean(layout.view.x + ((px - layout.x) / layout.scale));
+  const z = clean(layout.view.y + ((py - layout.y) / layout.scale));
+  return {
+    x: Math.max(0, Math.min(layout.paperW, x)),
+    z: Math.max(0, Math.min(layout.paperL, z)),
+    px,
+    py,
+    viewPx: px,
+    viewPy: py
+  };
+}
+
+function drawDropBoxesRect(ctx2, layout, box, fill, stroke, lineWidth = 2, alpha = 1) {
+  const x = layout.x + (box.position - layout.view.x) * layout.scale;
+  const y = layout.y + (box.z - layout.view.y) * layout.scale;
+  const w = box.width * layout.scale;
+  const h = box.length * layout.scale;
+  ctx2.save();
+  ctx2.globalAlpha = alpha;
+  if (fill) {
+    ctx2.fillStyle = fill;
+    ctx2.fillRect(x, y, w, h);
+  }
+  ctx2.lineWidth = lineWidth;
+  ctx2.strokeStyle = stroke;
+  ctx2.strokeRect(x, y, w, h);
+  ctx2.restore();
+}
+
+function dropBoxPalette(box, emphasis = "normal") {
+  const negative = Number(box.height) < 0;
+  if (negative) {
+    if (emphasis === "selected") return { fill: "rgba(176, 74, 45, 0.14)", stroke: "rgba(176, 74, 45, 0.62)" };
+    if (emphasis === "draft") return { fill: "rgba(176, 74, 45, 0.10)", stroke: "rgba(176, 74, 45, 0.9)" };
+    return { fill: "rgba(176, 74, 45, 0.08)", stroke: "rgba(176, 74, 45, 0.34)" };
+  }
+  if (emphasis === "selected") return { fill: "rgba(176, 74, 45, 0.10)", stroke: "rgba(176, 74, 45, 0.5)" };
+  if (emphasis === "draft") return { fill: "rgba(23, 32, 42, 0.08)", stroke: "rgba(23, 32, 42, 0.85)" };
+  return { fill: "rgba(40, 116, 166, 0.08)", stroke: "rgba(40, 116, 166, 0.32)" };
+}
+
+function drawDropBoxesEditor() {
+  const current = currentDropBoxesVar();
+  if (!current) return;
+  const state = current.dropboxes;
+  const layout = dropBoxesCanvasLayout(state);
+  const g = dropBoxesCanvasEl.getContext("2d");
+  g.setTransform(layout.dpr, 0, 0, layout.dpr, 0, 0);
+  g.clearRect(0, 0, layout.width, layout.height);
+
+  const paperX = layout.x + (0 - layout.view.x) * layout.scale;
+  const paperY = layout.y + (0 - layout.view.y) * layout.scale;
+  g.fillStyle = "#fffefb";
+  g.fillRect(paperX, paperY, layout.paperW * layout.scale, layout.paperL * layout.scale);
+  g.strokeStyle = "rgba(23, 32, 42, 0.55)";
+  g.lineWidth = 1.5;
+  g.strokeRect(paperX, paperY, layout.paperW * layout.scale, layout.paperL * layout.scale);
+
+  const step = Math.max(0.01, state.gridStep || 0.25);
+  g.strokeStyle = "rgba(54, 95, 132, 0.08)";
+  g.lineWidth = 1;
+  for (let x = step; x < state.paper.width - 1e-9; x += step) {
+    const px = layout.x + (x - layout.view.x) * layout.scale;
+    g.beginPath();
+    g.moveTo(px, paperY);
+    g.lineTo(px, paperY + layout.paperL * layout.scale);
+    g.stroke();
+  }
+  for (let z = step; z < state.paper.length - 1e-9; z += step) {
+    const py = layout.y + (z - layout.view.y) * layout.scale;
+    g.beginPath();
+    g.moveTo(paperX, py);
+    g.lineTo(paperX + layout.paperW * layout.scale, py);
+    g.stroke();
+  }
+  g.fillStyle = "rgba(54, 95, 132, 0.14)";
+  for (let x = 0; x <= state.paper.width + 1e-9; x += step) {
+    for (let z = 0; z <= state.paper.length + 1e-9; z += step) {
+      const px = layout.x + (x - layout.view.x) * layout.scale;
+      const py = layout.y + (z - layout.view.y) * layout.scale;
+      g.beginPath();
+      g.arc(px, py, 1.2, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+
+  for (let i = 0; i < state.boxes.length; i++) {
+    if (i === state.selectedIndex) continue;
+    const palette = dropBoxPalette(state.boxes[i], "normal");
+    drawDropBoxesRect(g, layout, state.boxes[i], palette.fill, palette.stroke, 1.5, 1);
+  }
+
+  if (state.selectedIndex >= 0 && state.boxes[state.selectedIndex]) {
+    const palette = dropBoxPalette(state.boxes[state.selectedIndex], "selected");
+    drawDropBoxesRect(g, layout, state.boxes[state.selectedIndex], palette.fill, palette.stroke, 2.5, 1);
+  }
+  if (state.draft) {
+    const palette = dropBoxPalette(state.draft, "draft");
+    drawDropBoxesRect(g, layout, state.draft, palette.fill, palette.stroke, 2.5, 1);
+    const x0 = layout.x + (state.draft.position - layout.view.x) * layout.scale;
+    const y0 = layout.y + (state.draft.z - layout.view.y) * layout.scale;
+    const x1 = layout.x + (state.draft.position + state.draft.width - layout.view.x) * layout.scale;
+    const y1 = layout.y + (state.draft.z + state.draft.length - layout.view.y) * layout.scale;
+    const yTopLeft = y0;
+    g.fillStyle = "#17202a";
+    for (const [hx, hy] of [[x0, y1], [x0, yTopLeft], [x1, y0], [x1, y1]]) {
+      g.beginPath();
+      g.arc(hx, hy, 4.5, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+
+  g.fillStyle = "#5d584f";
+  g.font = "12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+  g.fillText("x", paperX + layout.paperW * layout.scale + 10, paperY + layout.paperL * layout.scale + 14);
+  g.fillText("z", paperX - 12, paperY - 6);
+  g.fillText("z = 0", paperX, paperY - 6);
+}
+
+function refreshDropBoxesList(state) {
+  dropBoxesListEl.innerHTML = "";
+  if (!state.boxes.length) {
+    const empty = document.createElement("div");
+    empty.className = "dropBoxesListDims";
+    empty.textContent = "No boxes yet.";
+    dropBoxesListEl.appendChild(empty);
+    return;
+  }
+  for (let i = 0; i < state.boxes.length; i++) {
+    const box = state.boxes[i];
+    const row = document.createElement("div");
+    row.className = `dropBoxesListRow${i === state.selectedIndex ? " selected" : ""}`;
+    row.innerHTML = `<div class="dropBoxesListIndex">#${i + 1}</div>
+      <div class="dropBoxesListMeta">
+        <div class="dropBoxesListTitle">Px=${formatDropBoxesNumber(box.position)} Pz=${formatDropBoxesNumber(box.z)} W=${formatDropBoxesNumber(box.width)}</div>
+        <div class="dropBoxesListDims">L=${formatDropBoxesNumber(box.length)} H=${formatDropBoxesNumber(box.height)}</div>
+      </div>`;
+    row.addEventListener("click", () => {
+      const current = currentDropBoxesVar();
+      if (!current) return;
+      current.dropboxes.selectedIndex = i;
+      current.dropboxes.draft = { ...current.dropboxes.boxes[i] };
+      refreshDropBoxesEditor();
+    });
+    dropBoxesListEl.appendChild(row);
+  }
+}
+
+function refreshDropBoxesEditor() {
+  const current = currentDropBoxesVar();
+  if (!current) return;
+  current.dropboxes = sanitizeDropBoxesSpec(current.dropboxes);
+  const state = current.dropboxes;
+  dropPaperLengthEl.value = formatDropBoxesNumber(state.paper.length);
+  dropPaperWidthEl.value = formatDropBoxesNumber(state.paper.width);
+  dropPaperHeightEl.value = formatDropBoxesNumber(state.paper.height);
+  dropGridStepEl.value = formatDropBoxesNumber(state.gridStep);
+  dropSnapEl.checked = !!state.snap;
+  dropBoxPositionEl.value = formatDropBoxesNumber(state.draft.position);
+  dropBoxZEl.value = formatDropBoxesNumber(state.draft.z);
+  dropBoxWidthEl.value = formatDropBoxesNumber(state.draft.width);
+  dropBoxLengthEl.value = formatDropBoxesNumber(state.draft.length);
+  dropBoxHeightEl.value = formatDropBoxesNumber(state.draft.height);
+  dropBoxDeleteEl.disabled = state.selectedIndex < 0;
+  refreshDropBoxesList(state);
+  drawDropBoxesEditor();
+}
+
+function syncCurrentDropBoxesVar({ render = true, refresh = true } = {}) {
+  const current = currentDropBoxesVar();
+  if (!current) return;
+  const next = materializeDropBoxesVar(current.name, current.description || "", current.dropboxes);
+  current.source = next.source;
+  current.value = next.value;
+  current.dropboxes = next.dropboxes;
+  if (displayedDesign === selected || !isDesignVar(vars[displayedDesign])) displayedDesign = selected;
+  if (refresh) refreshUI();
+  if (render) renderAll();
 }
 
 function refreshUI() {
@@ -1318,9 +2055,16 @@ function refreshUI() {
   varDescEl.value = current.description || "";
   dataEl.value = current.source || "";
   const showControl = kind === "control";
+  const showDropBoxes = kind === "dropboxes";
   controlFieldsEl.hidden = !showControl;
+  dropBoxesEditorEl.hidden = !showDropBoxes;
   dataEl.hidden = showControl;
-  document.getElementById("designHelp").hidden = showControl;
+  dataEl.readOnly = showDropBoxes;
+  const designHelpEl = document.getElementById("designHelp");
+  designHelpEl.hidden = showControl;
+  designHelpEl.innerHTML = showDropBoxes
+    ? "The code below is generated from the interactive box editor. Drag in the grid or click <code>new box</code> to add a live box, then edit it directly."
+    : "Use raw JSON for a strip model, a single expression, or arbitrary JavaScript with an explicit <code>return</code>.";
   if (showControl) {
     const spec = sanitizeControl(current.control);
     current.control = spec;
@@ -1334,6 +2078,7 @@ function refreshUI() {
     controlSliderEl.step = String(spec.step);
     controlSliderEl.value = String(spec.value);
   }
+  if (showDropBoxes) refreshDropBoxesEditor();
 
   varListEl.innerHTML = "";
   for (let i = 0; i < vars.length; i++) {
@@ -1344,10 +2089,15 @@ function refreshUI() {
     const dims = isControlVar(v)
       ? `slider ${v.control.value} [${v.control.min}..${v.control.max}] step ${v.control.step}`
       : err ? "invalid" : `W=${paperParams(v.value).W.toFixed(2)} H=${paperParams(v.value).H.toFixed(2)}`;
+    const kindLabel = isControlVar(v)
+      ? "control"
+      : isDropBoxesVar(v)
+        ? "interactive dropboxes"
+        : (v.source.trim().startsWith("{") ? "json" : "expression/js");
     row.innerHTML = `<div class="rowMain">
       <div class="varName">${escapeHtml(v.name)}</div>
       <div class="varDesc">${escapeHtml(v.description || "no description")}</div>
-      <div class="rowStats">${dims} · ${isControlVar(v) ? "control" : (v.source.trim().startsWith("{") ? "json" : "expression/js")}</div>
+      <div class="rowStats">${dims} · ${kindLabel}</div>
     </div>
     <div class="varMeta">${i === selected ? "selected" : i === displayedDesign ? "shown" : `v${i + 1}`}</div>`;
     row.addEventListener("click", () => {
@@ -1361,8 +2111,15 @@ function refreshUI() {
 
 function recomputeAllDesigns() {
   for (let i = 0; i < vars.length; i++) {
-    if (isDesignVar(vars[i])) vars[i].value = evaluateSource(vars[i].source);
-    else vars[i].value = sanitizeControl(vars[i].control).value;
+    if (isControlVar(vars[i])) vars[i].value = sanitizeControl(vars[i].control).value;
+    else if (isDropBoxesVar(vars[i])) {
+      const next = materializeDropBoxesVar(vars[i].name, vars[i].description || "", vars[i].dropboxes);
+      vars[i].source = next.source;
+      vars[i].value = next.value;
+      vars[i].dropboxes = next.dropboxes;
+    } else {
+      vars[i].value = evaluateSource(vars[i].source);
+    }
   }
   const firstDesign = findFirstDesignIndex(displayedDesign);
   if (firstDesign === -1) throw Error("At least one design variable is required.");
@@ -1386,6 +2143,9 @@ function applyEditor() {
         step: Number(controlStepEl.value)
       });
       vars[selected] = makeControlVar(newName, varDescEl.value.trim(), control);
+    } else if (kind === "dropboxes") {
+      const baseSpec = isDropBoxesVar(vars[selected]) ? vars[selected].dropboxes : dropBoxesSpecFromDesign(vars[selected].value);
+      vars[selected] = makeDropBoxesVar(newName, varDescEl.value.trim(), baseSpec);
     } else {
       vars[selected] = makeVar(newName, varDescEl.value.trim(), dataEl.value);
     }
@@ -1459,6 +2219,8 @@ function sanitizeImportedVariables(items) {
     if ((raw.kind || "design") === "control") {
       const control = raw.control || (typeof raw.value === "number" ? { value: raw.value } : defaultControlSpec());
       out.push(makeControlVar(name, raw.description || "", control));
+    } else if ((raw.kind || "design") === "dropboxes") {
+      out.push(makeDropBoxesVar(name, raw.description || "", raw.dropboxes || defaultDropBoxesSpec()));
     } else {
       const source = typeof raw.source === "string"
         ? raw.source
@@ -1532,6 +2294,19 @@ function initialVars() {
     ["control_blend", "design driven by the mix_t slider control", `blend(gate, js_variant_gate, mix_t)`],
     ["step_triptych", "repeat() tiles a motif across the page width", `repeat(step, 3)`],
     ["recursive_cubes", "recursive corner-cube tower on a 2x2 folded page", `recursiveCornerCubes({ levels: 5 })`],
+    ["paper_box", "declarative paper plus a single dropped box", `dropBox(Paper(2, 5, 1.4), 1.1, 1.8, 0.85, 2.5)`],
+    { kind: "dropboxes", name: "paper_boxes_editor", description: "interactive drop-box editor backed by generated dropBoxes(...) code", dropboxes: {
+      paper: { length: 2, width: 6, height: 1.3 },
+      boxes: [
+        { length: 0.8, width: 1.2, height: 0.55, position: 1.2 },
+        { length: 1.2, width: 1.6, height: 0.9, position: 3.0 },
+        { length: 0.7, width: 1.0, height: 0.45, position: 4.8 }
+      ],
+      selectedIndex: 1,
+      snap: true,
+      gridStep: 0.1
+    } },
+    ["paper_boxes", "compose several boxes by repeatedly dropping them onto a shared paper", `dropBoxes(Paper(2, 6, 1.3), [[0.8, 1.2, 0.55, 1.2], [1.2, 1.6, 0.9, 3.0], [0.7, 1.0, 0.45, 4.8]])`],
     ["js_colonnade", "generated entirely from inline JavaScript", `return (() => {
   const widths = [0.7, 0.8, 0.9, 0.8, 0.7];
   const strips = widths.map((_, i) => {
@@ -1610,7 +2385,9 @@ return clamp(blend(lo, hi, 0.4), lo, hi);`]
     for (const spec of specs) {
       const v = Array.isArray(spec)
         ? makeVar(spec[0], spec[1], spec[2])
-        : makeControlVar(spec.name, spec.description, spec.control);
+        : spec.kind === "control"
+          ? makeControlVar(spec.name, spec.description, spec.control)
+          : makeDropBoxesVar(spec.name, spec.description, spec.dropboxes);
       seeded.push(v);
     }
   } finally {
@@ -1634,16 +2411,119 @@ function renderAll() {
   draw3D();
 }
 
-function drawPattern() {
-  const d = currentDesign();
+function patternCumulativeTs(strip) {
+  const out = [0];
+  let t = 0;
+  for (const len of strip) {
+    t += len;
+    out.push(clean(t));
+  }
+  return out;
+}
+
+function patternStripStateAt(strip, H, t) {
+  let acc = 0, y = 0, z = H;
+  for (let j = 0; j < strip.length; j++) {
+    const len = strip[j];
+    const next = acc + len;
+    const local = Math.min(t, next) - acc;
+    if (j % 2 === 0) {
+      if (t < next - 1e-9) return { y, z: clean(z - local), axis: "z", seg: j };
+      z = clean(z - len);
+    } else {
+      if (t < next - 1e-9) return { y: clean(y + local), z, axis: "y", seg: j };
+      y = clean(y + len);
+    }
+    acc = next;
+  }
+  return { y, z, axis: "end", seg: strip.length };
+}
+
+function buildPatternGeometry(d = currentDesign()) {
   const { W, H, twoH } = paperParams(d);
-  const r = pattern.getBoundingClientRect();
-  const width = r.width, height = r.height;
-  pattern.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  const xs = stripXPositions(d);
+  const geometry = {
+    W,
+    H,
+    twoH,
+    boardEdgePath: [[0, 0], [W, 0], [W, twoH], [0, twoH], [0, 0]],
+    cutPaths: [],
+    valleyPaths: [],
+    mountainPaths: []
+  };
+
+  for (let i = 0; i < d.strips.length; i++) {
+    const x0 = xs[i];
+    const x1 = xs[i + 1];
+    const ts = patternCumulativeTs(d.strips[i]);
+    for (let j = 1; j < ts.length - 1; j++) {
+      const t = ts[j];
+      const valley = Math.abs(t - H) < 1e-9 || (j - 1) % 2 === 0;
+      (valley ? geometry.valleyPaths : geometry.mountainPaths).push([[x0, t], [x1, t]]);
+    }
+  }
+
+  for (let i = 1; i < xs.length - 1; i++) {
+    const x = xs[i];
+    const left = d.strips[i - 1];
+    const right = d.strips[i];
+    const ts = [...new Set([...patternCumulativeTs(left), ...patternCumulativeTs(right), clean(H)])].sort((a, b) => a - b);
+    for (let j = 0; j < ts.length - 1; j++) {
+      const t0 = ts[j], t1 = ts[j + 1];
+      if (t1 <= t0 + 1e-9) continue;
+      const eps = Math.min(1e-5, (t1 - t0) * 0.25);
+      const a0 = patternStripStateAt(left, H, t0 + eps);
+      const a1 = patternStripStateAt(left, H, t1 - eps);
+      const b0 = patternStripStateAt(right, H, t0 + eps);
+      const b1 = patternStripStateAt(right, H, t1 - eps);
+      const continuous =
+        nearlyEqual(a0.y, b0.y) &&
+        nearlyEqual(a0.z, b0.z) &&
+        nearlyEqual(a1.y, b1.y) &&
+        nearlyEqual(a1.z, b1.z) &&
+        a0.axis === b0.axis &&
+        a1.axis === b1.axis;
+      if (!continuous) {
+        geometry.cutPaths.push([[x, t0], [x, t1]]);
+      }
+    }
+  }
+
+  return geometry;
+}
+
+function patternBounds(geometry = latestPatternGeometry || buildPatternGeometry()) {
+  const pad = Math.max(0.8, Math.max(geometry.W, geometry.twoH) * 0.08);
+  return {
+    x: -pad,
+    y: -pad,
+    width: geometry.W + pad * 2,
+    height: geometry.twoH + pad * 2
+  };
+}
+
+function fitPatternView(geometry = latestPatternGeometry || buildPatternGeometry()) {
+  patternView = patternBounds(geometry);
+}
+
+function applyPatternViewBox() {
+  if (!patternView) fitPatternView();
+  pattern.setAttribute("viewBox", `${patternView.x} ${patternView.y} ${patternView.width} ${patternView.height}`);
+}
+
+function drawPattern() {
+  const geometry = buildPatternGeometry();
+  const signature = JSON.stringify(geometry);
+  const geometryChanged = signature !== latestPatternSignature;
+  latestPatternSignature = signature;
+  latestPatternGeometry = geometry;
+  const { W, twoH } = geometry;
   pattern.innerHTML = "";
-  const margin = 42;
-  const s = Math.min((width - 2 * margin) / W, (height - 2 * margin) / twoH);
-  const ox = (width - W * s) / 2, oy = height / 2;
+  if (!patternView || patternViewAutoFit || geometryChanged) {
+    fitPatternView(geometry);
+    patternViewAutoFit = false;
+  }
+  applyPatternViewBox();
 
   function el(n) { return document.createElementNS("http://www.w3.org/2000/svg", n); }
   function line(x1, y1, x2, y2, stroke, dash = "", lw = 1.4) {
@@ -1655,6 +2535,7 @@ function drawPattern() {
     e.setAttribute("stroke", stroke);
     e.setAttribute("stroke-width", lw);
     e.setAttribute("stroke-linecap", "round");
+    e.setAttribute("vector-effect", "non-scaling-stroke");
     if (dash) e.setAttribute("stroke-dasharray", dash);
     pattern.appendChild(e);
   }
@@ -1671,93 +2552,143 @@ function drawPattern() {
     e.setAttribute("fill", fill);
     e.setAttribute("stroke", stroke);
     e.setAttribute("stroke-width", lw);
+    e.setAttribute("vector-effect", "non-scaling-stroke");
     pattern.appendChild(e);
   }
-  function text(x, y, t) {
-    const e = el("text");
-    e.setAttribute("x", x);
-    e.setAttribute("y", y);
-    e.setAttribute("font-size", "11");
-    e.setAttribute("fill", "#555");
-    e.textContent = t;
-    pattern.appendChild(e);
-  }
-
-  const top = oy - H * s, bottom = oy + H * s;
-  rect(ox, top, W * s, twoH * s, "rgba(255,255,252,.97)", "#8d8578", 1.6, 1.5);
-
-  function cumulativeTs(strip) {
-    const out = [0];
-    let t = 0;
-    for (const len of strip) {
-      t += len;
-      out.push(clean(t));
-    }
-    return out;
-  }
-  function screenYFromT(t) {
-    return oy - (-H + t) * s;
-  }
-  function stripStateAt(strip, t) {
-    let acc = 0, y = 0, z = H;
-    for (let j = 0; j < strip.length; j++) {
-      const len = strip[j];
-      const next = acc + len;
-      const local = Math.min(t, next) - acc;
-      if (j % 2 === 0) {
-        if (t < next - 1e-9) return { y, z: clean(z - local), axis: "z", seg: j };
-        z = clean(z - len);
-      } else {
-        if (t < next - 1e-9) return { y: clean(y + local), z, axis: "y", seg: j };
-        y = clean(y + len);
-      }
-      acc = next;
-    }
-    return { y, z, axis: "end", seg: strip.length };
-  }
-
-  const xs = stripXPositions(d);
-  for (let i = 0; i < d.strips.length; i++) {
-    const x0 = ox + xs[i] * s;
-    const x1 = ox + xs[i + 1] * s;
-    const ts = cumulativeTs(d.strips[i]);
-    for (let j = 1; j < ts.length - 1; j++) {
-      const t = ts[j];
-      const valley = Math.abs(t - H) < 1e-9 || (j - 1) % 2 === 0;
-      line(x0, screenYFromT(t), x1, screenYFromT(t), valley ? "#2874a6" : "#b04a2d", valley ? "7 5" : "2 5", 1.5);
+  function drawPath(path, stroke, dash = "", lw = 1.4) {
+    for (let i = 1; i < path.length; i++) {
+      const [x0, y0] = path[i - 1];
+      const [x1, y1] = path[i];
+      line(x0, y0, x1, y1, stroke, dash, lw);
     }
   }
 
-  for (let i = 1; i < xs.length - 1; i++) {
-    const x = ox + xs[i] * s;
-    const left = d.strips[i - 1];
-    const right = d.strips[i];
-    const ts = [...new Set([...cumulativeTs(left), ...cumulativeTs(right), clean(H)])].sort((a, b) => a - b);
-    for (let j = 0; j < ts.length - 1; j++) {
-      const t0 = ts[j], t1 = ts[j + 1];
-      if (t1 <= t0 + 1e-9) continue;
-      const eps = Math.min(1e-5, (t1 - t0) * 0.25);
-      const a0 = stripStateAt(left, t0 + eps);
-      const a1 = stripStateAt(left, t1 - eps);
-      const b0 = stripStateAt(right, t0 + eps);
-      const b1 = stripStateAt(right, t1 - eps);
-      const continuous =
-        nearlyEqual(a0.y, b0.y) &&
-        nearlyEqual(a0.z, b0.z) &&
-        nearlyEqual(a1.y, b1.y) &&
-        nearlyEqual(a1.z, b1.z) &&
-        a0.axis === b0.axis &&
-        a1.axis === b1.axis;
-      if (!continuous) {
-        line(x, screenYFromT(t0), x, screenYFromT(t1), "#111", "", 2.05);
-      }
+  rect(0, 0, W, twoH, "rgba(255,255,252,.97)", "#8d8578", 1.6, 0);
+  for (const path of geometry.valleyPaths) drawPath(path, "#2874a6", "7 5", 1.5);
+  for (const path of geometry.mountainPaths) drawPath(path, "#b04a2d", "2 5", 1.5);
+  for (const path of geometry.cutPaths) drawPath(path, "#111", "", 2.05);
+  drawPath(geometry.boardEdgePath, "#444", "", 2.1);
+}
+
+function currentPlotterOptions() {
+  const units = Number(plotterUnitsPerPaperUnitEl.value);
+  const scale = Number(plotterScaleEl.value);
+  return {
+    originX: Number(plotterOriginXEl.value) || 0,
+    originY: Number(plotterOriginYEl.value) || 0,
+    unitsPerPaperUnit: Number.isFinite(units) && units > 0 ? units : 1000,
+    scale: Number.isFinite(scale) && scale > 0 ? scale : 1,
+    flipY: !!plotterFlipYEl.checked
+  };
+}
+
+function logPlotterStatus(message) {
+  const stamp = new Date().toLocaleTimeString();
+  plotterStatusLogEl.textContent = `[${stamp}] ${message}\n${plotterStatusLogEl.textContent}`.trim();
+}
+
+function transformPlotterPoint(point, geometry, options) {
+  const [x, t] = point;
+  const scaledX = x * options.scale;
+  const scaledT = t * options.scale;
+  const scaledHeight = geometry.twoH * options.scale;
+  const y = options.flipY ? (scaledHeight - scaledT) : scaledT;
+  return [
+    Math.round(options.originX + scaledX * options.unitsPerPaperUnit),
+    Math.round(options.originY + y * options.unitsPerPaperUnit)
+  ];
+}
+
+function patternPointFromClient(clientX, clientY) {
+  const rect = pattern.getBoundingClientRect();
+  if (!patternView || rect.width <= 0 || rect.height <= 0) return [0, 0];
+  const x = patternView.x + ((clientX - rect.left) / rect.width) * patternView.width;
+  const y = patternView.y + ((clientY - rect.top) / rect.height) * patternView.height;
+  return [x, y];
+}
+
+function buildPlotterJob(paths, label) {
+  const geometry = latestPatternGeometry || buildPatternGeometry();
+  const options = currentPlotterOptions();
+  const validPaths = paths.filter(path => Array.isArray(path) && path.length >= 2);
+  if (!validPaths.length) throw Error(`No ${label} paths are available to send.`);
+  const commands = ["EC1", "U", "H", "L0"];
+  for (const path of validPaths) {
+    const transformed = path.map(point => transformPlotterPoint(point, geometry, options));
+    commands.push("U", `A${transformed[0][0]},${transformed[0][1]}`, "D");
+    for (let i = 1; i < transformed.length; i++) {
+      commands.push(`A${transformed[i][0]},${transformed[i][1]}`);
     }
   }
+  commands.push("U");
+  const text = `;:${commands.join(",")},`;
+  plotterCommandPreviewEl.value = text;
+  return text;
+}
 
-  line(ox, top, ox, bottom, "#444", "", 2.1);
-  line(ox + W * s, top, ox + W * s, bottom, "#444", "", 2.1);
-  line(ox, top, ox + W * s, top, "#444", "", 2.1);
-  line(ox, bottom, ox + W * s, bottom, "#444", "", 2.1);
+function plotterPathsForKind(kind) {
+  const geometry = latestPatternGeometry || buildPatternGeometry();
+  if (kind === "edge") return [geometry.boardEdgePath];
+  if (kind === "cuts") return geometry.cutPaths;
+  if (kind === "valleys") return geometry.valleyPaths;
+  if (kind === "mountains") return geometry.mountainPaths;
+  return [];
+}
+
+async function ensurePlotterSerialSupport() {
+  if (!("serial" in navigator)) {
+    throw Error("Web Serial is not available in this browser. Use recent Chrome or Edge over HTTPS or localhost.");
+  }
+}
+
+async function connectPlotterSerial() {
+  await ensurePlotterSerialSupport();
+  if (!plotterPort) plotterPort = await navigator.serial.requestPort();
+  if (!plotterPort.readable && !plotterPort.writable) {
+    await plotterPort.open({
+      baudRate: 9600,
+      dataBits: 8,
+      parity: "none",
+      stopBits: 1,
+      flowControl: "hardware"
+    });
+  }
+  plotterSerialInfoEl.textContent = "Plotter serial: connected";
+  logPlotterStatus("Serial port opened at 9600 8N1 with hardware flow control.");
+}
+
+async function disconnectPlotterSerial() {
+  if (!plotterPort) {
+    plotterSerialInfoEl.textContent = "Plotter serial: not connected";
+    return;
+  }
+  try {
+    if (plotterPort.readable || plotterPort.writable) await plotterPort.close();
+  } finally {
+    plotterPort = null;
+    plotterSerialInfoEl.textContent = "Plotter serial: not connected";
+    logPlotterStatus("Serial port closed.");
+  }
+}
+
+async function writePlotterSerial(text) {
+  await connectPlotterSerial();
+  if (!plotterPort || !plotterPort.writable) throw Error("Serial port is not writable.");
+  const writer = plotterPort.writable.getWriter();
+  const encoder = new TextEncoder();
+  try {
+    for (let start = 0; start < text.length; start += 256) {
+      await writer.write(encoder.encode(text.slice(start, start + 256)));
+    }
+  } finally {
+    writer.releaseLock();
+  }
+}
+
+async function sendPlotterKind(kind, label) {
+  const job = buildPlotterJob(plotterPathsForKind(kind), label);
+  await writePlotterSerial(job);
+  logPlotterStatus(`Sent ${label} job (${job.length} characters).`);
 }
 
 function stripXPositions(d = currentDesign()) {
@@ -2298,11 +3229,11 @@ function animateCameraStep(now) {
   camAnimHandle = requestAnimationFrame(animateCameraStep);
 }
 
-function ensureCameraAnimation() {
+function ensureCameraAnimation(duration = CAMERA_ANIMATION_MS) {
   camAnimation = {
     start: cameraPose(cam),
     startTime: null,
-    duration: CAMERA_ANIMATION_MS
+    duration
   };
   if (camAnimHandle) cancelAnimationFrame(camAnimHandle);
   camAnimHandle = requestAnimationFrame(animateCameraStep);
@@ -2319,7 +3250,7 @@ function setCameraView(view, options = {}) {
     draw3D();
     return;
   }
-  ensureCameraAnimation();
+  ensureCameraAnimation(options.duration);
 }
 
 function startPlotSelectionAnimation() {
@@ -2748,14 +3679,10 @@ canvas.addEventListener("pointerleave", ev => {
 });
 canvas.addEventListener("wheel", ev => {
   ev.preventDefault();
-  stopCameraAnimation();
   stopInertia();
-  noteCameraInteraction();
   const factor = Math.exp(-ev.deltaY * 0.0015);
-  cam.zoom *= factor;
-  cam.zoom = Math.max(MIN_CAMERA_ZOOM, Math.min(MAX_CAMERA_ZOOM, cam.zoom));
-  syncCameraTarget();
-  draw3D();
+  const targetZoom = Math.max(MIN_CAMERA_ZOOM, Math.min(MAX_CAMERA_ZOOM, camTarget.zoom * factor));
+  setCameraView({ zoom: targetZoom }, { duration: WHEEL_ZOOM_ANIMATION_MS });
 }, { passive: false });
 
 cubeCanvas.addEventListener("mousemove", ev => {
@@ -2787,9 +3714,169 @@ idleOrbitEl.addEventListener("change", () => {
   noteCameraInteraction();
   if (!idleOrbitEl.checked) draw3D();
 });
+plotterConnectEl.addEventListener("click", async () => {
+  try {
+    await connectPlotterSerial();
+  } catch (error) {
+    logPlotterStatus(error.message || String(error));
+  }
+});
+plotterDisconnectEl.addEventListener("click", async () => {
+  try {
+    await disconnectPlotterSerial();
+  } catch (error) {
+    logPlotterStatus(error.message || String(error));
+  }
+});
+plotterSendBorderEl.addEventListener("click", async () => {
+  try {
+    await sendPlotterKind("edge", "board edge");
+  } catch (error) {
+    logPlotterStatus(error.message || String(error));
+  }
+});
+plotterSendCutsEl.addEventListener("click", async () => {
+  try {
+    await sendPlotterKind("cuts", "cut marks");
+  } catch (error) {
+    logPlotterStatus(error.message || String(error));
+  }
+});
+plotterSendValleysEl.addEventListener("click", async () => {
+  try {
+    await sendPlotterKind("valleys", "valley folds");
+  } catch (error) {
+    logPlotterStatus(error.message || String(error));
+  }
+});
+plotterSendMountainsEl.addEventListener("click", async () => {
+  try {
+    await sendPlotterKind("mountains", "mountain folds");
+  } catch (error) {
+    logPlotterStatus(error.message || String(error));
+  }
+});
+if (plotterPanelEl) {
+  plotterPanelEl.addEventListener("toggle", () => {
+    if (plotterDividerEl) plotterDividerEl.hidden = !plotterPanelEl.open;
+    patternViewAutoFit = true;
+    requestAnimationFrame(drawPattern);
+  });
+}
+if (plotterDividerEl && panePatternEl && plotterPanelEl) {
+  plotterDividerEl.hidden = !plotterPanelEl.open;
+  plotterDividerEl.addEventListener("pointerdown", ev => {
+    plotterDividerEl.setPointerCapture(ev.pointerId);
+    plotterDividerDrag = {
+      id: ev.pointerId,
+      startY: ev.clientY,
+      startHeight: plotterPanelEl.getBoundingClientRect().height || 220
+    };
+  });
+  plotterDividerEl.addEventListener("pointermove", ev => {
+    if (!plotterDividerDrag || ev.pointerId !== plotterDividerDrag.id) return;
+    const paneRect = panePatternEl.getBoundingClientRect();
+    const next = Math.max(54, Math.min(paneRect.height - 190, plotterDividerDrag.startHeight - (ev.clientY - plotterDividerDrag.startY)));
+    panePatternEl.style.setProperty("--plotterPanelHeight", `${Math.round(next)}px`);
+    patternViewAutoFit = true;
+    drawPattern();
+  });
+  const endPlotterDividerDrag = ev => {
+    if (!plotterDividerDrag || ev.pointerId !== plotterDividerDrag.id) return;
+    plotterDividerDrag = null;
+  };
+  plotterDividerEl.addEventListener("pointerup", endPlotterDividerDrag);
+  plotterDividerEl.addEventListener("pointercancel", endPlotterDividerDrag);
+}
+pattern.addEventListener("contextmenu", ev => ev.preventDefault());
+pattern.addEventListener("dblclick", () => {
+  fitPatternView();
+  patternViewAutoFit = false;
+  drawPattern();
+});
+pattern.addEventListener("pointerdown", ev => {
+  if (ev.pointerType === "mouse" && ev.button !== 2) return;
+  pattern.setPointerCapture(ev.pointerId);
+  patternPointer = {
+    id: ev.pointerId,
+    startClientX: ev.clientX,
+    startClientY: ev.clientY,
+    startView: patternView ? { ...patternView } : patternBounds()
+  };
+});
+pattern.addEventListener("pointermove", ev => {
+  if (!patternPointer || ev.pointerId !== patternPointer.id) return;
+  const rect = pattern.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
+  const dx = ((ev.clientX - patternPointer.startClientX) / rect.width) * patternPointer.startView.width;
+  const dy = ((ev.clientY - patternPointer.startClientY) / rect.height) * patternPointer.startView.height;
+  patternView = {
+    ...patternPointer.startView,
+    x: patternPointer.startView.x - dx,
+    y: patternPointer.startView.y - dy
+  };
+  patternViewAutoFit = false;
+  applyPatternViewBox();
+});
+function endPatternPointer(ev) {
+  if (!patternPointer || ev.pointerId !== patternPointer.id) return;
+  patternPointer = null;
+}
+pattern.addEventListener("pointerup", endPatternPointer);
+pattern.addEventListener("pointercancel", endPatternPointer);
+pattern.addEventListener("wheel", ev => {
+  ev.preventDefault();
+  if (!patternView) fitPatternView();
+  const anchorX = patternView.x + patternView.width / 2;
+  const anchorY = patternView.y + patternView.height / 2;
+  const factor = Math.exp(ev.deltaY * 0.0012);
+  const nextWidth = Math.max(1, Math.min(5000, patternView.width * factor));
+  const nextHeight = Math.max(1, Math.min(5000, patternView.height * factor));
+  patternView = {
+    x: anchorX - nextWidth / 2,
+    y: anchorY - nextHeight / 2,
+    width: nextWidth,
+    height: nextHeight
+  };
+  patternViewAutoFit = false;
+  applyPatternViewBox();
+}, { passive: false });
 window.addEventListener("keydown", ev => {
+  const currentDrop = currentDropBoxesVar();
+  if (currentDrop && !dropBoxesEditorEl.hidden) {
+    const activeTag = document.activeElement && document.activeElement.tagName ? document.activeElement.tagName.toUpperCase() : "";
+    const editingTextField = document.activeElement === varNameEl || document.activeElement === varDescEl || document.activeElement === dataEl;
+    const editingAnyField = ["INPUT", "TEXTAREA", "SELECT"].includes(activeTag);
+    if (!editingAnyField && ev.key === "Delete") {
+      if (currentDrop.dropboxes.selectedIndex >= 0) {
+        ev.preventDefault();
+        deleteSelectedDropBox();
+        return;
+      }
+    }
+    if (!editingAnyField && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(ev.key)) {
+      const state = currentDrop.dropboxes;
+      const delta = state.snap ? state.gridStep : 0.05;
+      const minExtent = dropBoxesMinExtent(state);
+      if (state.draft) {
+        const box = { ...state.draft };
+        if (ev.key === "ArrowLeft") box.position -= delta;
+        if (ev.key === "ArrowRight") box.position += delta;
+        if (ev.key === "ArrowUp") box.height += delta;
+        if (ev.key === "ArrowDown") box.height = Math.max(minExtent, box.height - delta);
+        state.draft = sanitizeDropBoxItem(box, state.paper.width, state.paper.length, dropBoxesMinExtent(state));
+        if (state.selectedIndex >= 0 && state.selectedIndex < state.boxes.length) {
+          state.boxes[state.selectedIndex] = { ...state.draft };
+        }
+        syncSelectedDropBoxesEdit(state);
+        ev.preventDefault();
+        refreshDropBoxesEditor();
+        return;
+      }
+    }
+  }
   if (!view3DHotkeysActive) return;
-  if (ev.key === "Escape") {
+  if (ev.key === "Escape" || ev.key === "`") {
     ev.preventDefault();
     resetCameraView();
     return;
@@ -2800,6 +3887,370 @@ window.addEventListener("keydown", ev => {
     setCameraView(view);
   }
 });
+
+function updateDropBoxesPaperFromInputs() {
+  const current = currentDropBoxesVar();
+  if (!current) return;
+  current.dropboxes.paper.length = Math.max(0.01, Number(dropPaperLengthEl.value) || current.dropboxes.paper.length);
+  current.dropboxes.paper.width = Math.max(0.01, Number(dropPaperWidthEl.value) || current.dropboxes.paper.width);
+  current.dropboxes.paper.height = Math.max(0.01, Number(dropPaperHeightEl.value) || current.dropboxes.paper.height);
+  current.dropboxes = sanitizeDropBoxesSpec(current.dropboxes);
+  dropBoxesViewAutoFit = true;
+  syncCurrentDropBoxesVar();
+}
+
+function updateDropBoxesEditorPrefs() {
+  const current = currentDropBoxesVar();
+  if (!current) return;
+  current.dropboxes.gridStep = Math.max(0.01, Number(dropGridStepEl.value) || current.dropboxes.gridStep);
+  current.dropboxes.snap = !!dropSnapEl.checked;
+  current.dropboxes = sanitizeDropBoxesSpec(current.dropboxes);
+  refreshUI();
+}
+
+function updateDropBoxesDraftFromInputs() {
+  const current = currentDropBoxesVar();
+  if (!current) return;
+  const state = current.dropboxes;
+  const rawHeightText = String(dropBoxHeightEl.value).trim();
+  if (rawHeightText === "-" || rawHeightText === "+" || rawHeightText === "" || rawHeightText === "-." || rawHeightText === "+.") {
+    return;
+  }
+  const parsedHeight = Number(dropBoxHeightEl.value);
+  state.draft = sanitizeDropBoxItem({
+    position: snapDropBoxesValue(dropBoxPositionEl.value, state),
+    z: snapDropBoxesValue(dropBoxZEl.value, state),
+    width: snapDropBoxesValue(dropBoxWidthEl.value, state),
+    length: snapDropBoxesValue(dropBoxLengthEl.value, state),
+    height: Number.isFinite(parsedHeight) ? (state.snap ? clean(Math.round(parsedHeight / state.gridStep) * state.gridStep) : parsedHeight) : state.draft.height
+  }, state.paper.width, state.paper.length, dropBoxesMinExtent(state));
+  if (state.selectedIndex >= 0 && state.selectedIndex < state.boxes.length) {
+    state.boxes[state.selectedIndex] = { ...state.draft };
+  }
+  syncSelectedDropBoxesEdit(state);
+  refreshDropBoxesEditor();
+}
+
+function newDropBoxesDraft() {
+  const current = currentDropBoxesVar();
+  if (!current) return;
+  const state = current.dropboxes = sanitizeDropBoxesSpec(current.dropboxes);
+  const box = makeDropBoxesDefaultDraft(state);
+  state.boxes.push(box);
+  state.selectedIndex = state.boxes.length - 1;
+  state.draft = { ...box };
+  syncCurrentDropBoxesVar();
+}
+
+function deleteSelectedDropBox() {
+  const current = currentDropBoxesVar();
+  if (!current) return;
+  const state = current.dropboxes;
+  if (state.selectedIndex < 0 || state.selectedIndex >= state.boxes.length) return;
+  state.boxes.splice(state.selectedIndex, 1);
+  if (state.boxes.length) {
+    state.selectedIndex = state.boxes.length - 1;
+    state.draft = { ...state.boxes[state.selectedIndex] };
+  } else {
+    state.selectedIndex = -1;
+    state.draft = makeDropBoxesDefaultDraft(state);
+  }
+  syncCurrentDropBoxesVar();
+}
+
+function dragModeForDropBoxesPoint(state, point) {
+  const layout = dropBoxesCanvasLayout(state);
+  const draft = state.draft;
+  const left = layout.x + (draft.position - layout.view.x) * layout.scale;
+  const top = layout.y + (draft.z - layout.view.y) * layout.scale;
+  const right = layout.x + (draft.position + draft.width - layout.view.x) * layout.scale;
+  const bottom = layout.y + (draft.z + draft.length - layout.view.y) * layout.scale;
+  const centerX = (left + right) / 2;
+  const centerY = (top + bottom) / 2;
+  const handleR = 10;
+  const edgeTol = 7;
+  const hitBottomLeft = Math.hypot(point.viewPx - left, point.viewPy - bottom) <= handleR;
+  const hitBottomRight = Math.hypot(point.viewPx - right, point.viewPy - bottom) <= handleR;
+  const hitTopLeft = Math.hypot(point.viewPx - left, point.viewPy - top) <= handleR;
+  const hitTopRight = Math.hypot(point.viewPx - right, point.viewPy - top) <= handleR;
+  const hitLeftEdge = Math.abs(point.viewPx - left) <= edgeTol && point.viewPy >= top + handleR * 0.5 && point.viewPy <= bottom - handleR * 0.5;
+  const hitRightEdge = Math.abs(point.viewPx - right) <= edgeTol && point.viewPy >= top + handleR * 0.5 && point.viewPy <= bottom - handleR * 0.5;
+  const hitTopEdge = Math.abs(point.viewPy - top) <= edgeTol && point.viewPx >= left + handleR * 0.5 && point.viewPx <= right - handleR * 0.5;
+  const hitBottomEdge = Math.abs(point.viewPy - bottom) <= edgeTol && point.viewPx >= left + handleR * 0.5 && point.viewPx <= right - handleR * 0.5;
+  const inside = point.viewPx >= left && point.viewPx <= right && point.viewPy >= top && point.viewPy <= bottom;
+  if (hitBottomLeft) return "bottomLeft";
+  if (hitBottomRight) return "bottomRight";
+  if (hitTopLeft) return "topLeft";
+  if (hitTopRight) return "topRight";
+  if (hitLeftEdge) return "leftEdge";
+  if (hitRightEdge) return "rightEdge";
+  if (hitTopEdge) return "topEdge";
+  if (hitBottomEdge) return "bottomEdge";
+  if (inside || Math.hypot(point.viewPx - centerX, point.viewPy - centerY) <= 12) return "move";
+  return "new";
+}
+
+function syncSelectedDropBoxesEdit(state) {
+  if (state.selectedIndex >= 0 && state.selectedIndex < state.boxes.length) {
+    syncCurrentDropBoxesVar({ render: true, refresh: false });
+    return true;
+  }
+  return false;
+}
+
+function cursorForDropBoxesMode(mode) {
+  if (mode === "left") return "ew-resize";
+  if (mode === "bottomLeft") return "nesw-resize";
+  if (mode === "bottomRight") return "nwse-resize";
+  if (mode === "leftEdge") return "ew-resize";
+  if (mode === "rightEdge") return "ew-resize";
+  if (mode === "topEdge") return "ns-resize";
+  if (mode === "bottomEdge") return "ns-resize";
+  if (mode === "topLeft") return "nwse-resize";
+  if (mode === "topRight") return "nesw-resize";
+  if (mode === "move") return "move";
+  if (mode === "pan") return "grabbing";
+  return "crosshair";
+}
+
+function hitDropBoxesAtPoint(state, point) {
+  const hits = [];
+  for (let i = state.boxes.length - 1; i >= 0; i--) {
+    const box = state.boxes[i];
+    if (point.x >= box.position - 1e-9 && point.x <= box.position + box.width + 1e-9
+      && point.z >= box.z - 1e-9 && point.z <= box.z + box.length + 1e-9) {
+      hits.push(i);
+    }
+  }
+  return hits;
+}
+
+function cycleDropBoxesHit(point, hits) {
+  if (!hits.length) {
+    dropBoxesHitCycle = null;
+    return -1;
+  }
+  const key = `${hits.join(",")}|${clean(point.x)}|${clean(point.z)}`;
+  let nextIndex = hits[0];
+  if (dropBoxesHitCycle && dropBoxesHitCycle.key === key) {
+    const currentPos = hits.indexOf(dropBoxesHitCycle.index);
+    if (currentPos >= 0) nextIndex = hits[(currentPos + 1) % hits.length];
+  }
+  dropBoxesHitCycle = { key, index: nextIndex };
+  return nextIndex;
+}
+
+function beginDropBoxesPointer(ev) {
+  const current = currentDropBoxesVar();
+  if (!current || (ev.pointerType === "mouse" && ev.button !== 0 && ev.button !== 2)) return;
+  const state = current.dropboxes;
+  const layout = dropBoxesCanvasLayout(state);
+  const point = canvasPointToDropBoxes(layout, ev.clientX, ev.clientY);
+  if (ev.pointerType === "mouse" && ev.button === 2) {
+    dropBoxesCanvasEl.setPointerCapture(ev.pointerId);
+    dropBoxesPointer = {
+      id: ev.pointerId,
+      mode: "pan",
+      startClientX: ev.clientX,
+      startClientY: ev.clientY,
+      startView: dropBoxesView ? { ...dropBoxesView } : { ...layout.view }
+    };
+    dropBoxesCanvasEl.style.cursor = "grabbing";
+    return;
+  }
+  const hitIndices = hitDropBoxesAtPoint(state, point);
+  const draftMode = dragModeForDropBoxesPoint(state, point);
+  const canCycleExistingSelection = hitIndices.length > 0
+    && (draftMode === "new" || (draftMode === "move" && hitIndices.length > 1));
+  if (canCycleExistingSelection) {
+    const hitIndex = cycleDropBoxesHit(point, hitIndices);
+    if (hitIndex >= 0) {
+      state.selectedIndex = hitIndex;
+      state.draft = { ...state.boxes[hitIndex] };
+    }
+  } else if (!hitIndices.length) {
+    dropBoxesHitCycle = null;
+  } else if (hitIndices.length === 1) {
+    dropBoxesHitCycle = null;
+  }
+  if (draftMode === "new" && state.selectedIndex >= 0 && state.boxes[state.selectedIndex]) {
+    const selectedBox = state.boxes[state.selectedIndex];
+    if (!(point.x >= selectedBox.position - 1e-9 && point.x <= selectedBox.position + selectedBox.width + 1e-9
+      && point.z >= selectedBox.z - 1e-9 && point.z <= selectedBox.z + selectedBox.length + 1e-9)) {
+      state.selectedIndex = -1;
+      state.draft = makeDropBoxesDefaultDraft(state);
+      dropBoxesHitCycle = null;
+    } else {
+      state.draft = { ...selectedBox };
+    }
+  }
+  if (draftMode === "new" && hitIndices.length === 0) {
+    state.selectedIndex = -1;
+    dropBoxesHitCycle = null;
+  }
+  const mode = draftMode === "new" ? dragModeForDropBoxesPoint(state, point) : draftMode;
+  dropBoxesCanvasEl.style.cursor = cursorForDropBoxesMode(mode);
+  dropBoxesCanvasEl.setPointerCapture(ev.pointerId);
+  dropBoxesPointer = {
+    id: ev.pointerId,
+    mode,
+    anchorX: snapDropBoxesValue(point.x, state),
+    anchorZ: snapDropBoxesValue(point.z, state),
+    startDraft: { ...state.draft },
+    startRight: state.draft.position + state.draft.width,
+    startBottom: state.draft.z + state.draft.length
+  };
+  if (mode === "new") {
+    const anchor = snapDropBoxesValue(point.x, state);
+    const box = sanitizeDropBoxItem({
+      position: anchor,
+      z: snapDropBoxesValue(point.z, state),
+      width: Math.max(state.gridStep, 0.01),
+      length: Math.max(state.gridStep, 0.01),
+      height: state.draft.height
+    }, state.paper.width, state.paper.length, dropBoxesMinExtent(state));
+    state.boxes.push(box);
+    state.selectedIndex = state.boxes.length - 1;
+    state.draft = { ...box };
+    dropBoxesHitCycle = null;
+    syncSelectedDropBoxesEdit(state);
+    refreshDropBoxesEditor();
+  } else if (state.selectedIndex >= 0 && state.boxes[state.selectedIndex]) {
+    state.draft = { ...state.boxes[state.selectedIndex] };
+    refreshDropBoxesEditor();
+  }
+}
+
+function moveDropBoxesPointer(ev) {
+  const current = currentDropBoxesVar();
+  if (!current) return;
+  const state = current.dropboxes;
+  const layout = dropBoxesCanvasLayout(state);
+  const point = canvasPointToDropBoxes(layout, ev.clientX, ev.clientY);
+  if (!dropBoxesPointer || ev.pointerId !== dropBoxesPointer.id) {
+    dropBoxesCanvasEl.style.cursor = cursorForDropBoxesMode(dragModeForDropBoxesPoint(state, point));
+    return;
+  }
+  if (dropBoxesPointer.mode === "pan") {
+    const rect = dropBoxesCanvasEl.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const dx = ((ev.clientX - dropBoxesPointer.startClientX) / rect.width) * dropBoxesPointer.startView.width;
+    const dy = ((ev.clientY - dropBoxesPointer.startClientY) / rect.height) * dropBoxesPointer.startView.height;
+    dropBoxesView = {
+      ...dropBoxesPointer.startView,
+      x: dropBoxesPointer.startView.x - dx,
+      y: dropBoxesPointer.startView.y - dy
+    };
+    dropBoxesViewAutoFit = false;
+    drawDropBoxesEditor();
+    return;
+  }
+  const snappedX = snapDropBoxesValue(point.x, state);
+  const snappedZ = snapDropBoxesValue(point.z, state);
+  const minExtent = dropBoxesMinExtent(state);
+  if (dropBoxesPointer.mode === "left" || dropBoxesPointer.mode === "leftEdge") {
+    const right = dropBoxesPointer.startRight;
+    const nextLeft = Math.min(right - minExtent, Math.max(0, snappedX));
+    state.draft.position = nextLeft;
+    state.draft.width = Math.max(minExtent, right - nextLeft);
+  } else if (dropBoxesPointer.mode === "bottomLeft") {
+    const right = dropBoxesPointer.startRight;
+    const top = dropBoxesPointer.startDraft.z;
+    const nextLeft = Math.min(right - minExtent, Math.max(0, snappedX));
+    const nextBottom = Math.max(top + minExtent, Math.min(state.paper.length, snappedZ));
+    state.draft.position = nextLeft;
+    state.draft.width = Math.max(minExtent, right - nextLeft);
+    state.draft.z = top;
+    state.draft.length = Math.max(minExtent, nextBottom - top);
+  } else if (dropBoxesPointer.mode === "rightEdge") {
+    state.draft.width = Math.max(minExtent, snappedX - state.draft.position);
+  } else if (dropBoxesPointer.mode === "topEdge") {
+    const bottom = dropBoxesPointer.startBottom;
+    const nextTop = Math.min(bottom - minExtent, Math.max(0, snappedZ));
+    state.draft.z = nextTop;
+    state.draft.length = Math.max(minExtent, bottom - nextTop);
+  } else if (dropBoxesPointer.mode === "bottomEdge") {
+    const top = dropBoxesPointer.startDraft.z;
+    const nextBottom = Math.max(top + minExtent, Math.min(state.paper.length, snappedZ));
+    state.draft.z = top;
+    state.draft.length = Math.max(minExtent, nextBottom - top);
+  } else if (dropBoxesPointer.mode === "topLeft") {
+    const right = dropBoxesPointer.startRight;
+    const bottom = dropBoxesPointer.startBottom;
+    const nextLeft = Math.min(right - minExtent, Math.max(0, snappedX));
+    const nextTop = Math.min(bottom - minExtent, Math.max(0, snappedZ));
+    state.draft.position = nextLeft;
+    state.draft.width = Math.max(minExtent, right - nextLeft);
+    state.draft.z = nextTop;
+    state.draft.length = Math.max(minExtent, bottom - nextTop);
+  } else if (dropBoxesPointer.mode === "topRight") {
+    const bottom = dropBoxesPointer.startBottom;
+    const nextTop = Math.min(bottom - minExtent, Math.max(0, snappedZ));
+    state.draft.width = Math.max(minExtent, snappedX - state.draft.position);
+    state.draft.z = nextTop;
+    state.draft.length = Math.max(minExtent, bottom - nextTop);
+  } else if (dropBoxesPointer.mode === "bottomRight") {
+    const top = dropBoxesPointer.startDraft.z;
+    const nextBottom = Math.max(top + minExtent, Math.min(state.paper.length, snappedZ));
+    state.draft.width = Math.max(minExtent, snappedX - state.draft.position);
+    state.draft.z = top;
+    state.draft.length = Math.max(minExtent, nextBottom - top);
+  } else if (dropBoxesPointer.mode === "move") {
+    const dx = snappedX - snapDropBoxesValue(dropBoxesPointer.anchorX, state);
+    const dz = snappedZ - snapDropBoxesValue(dropBoxesPointer.anchorZ, state);
+    state.draft.position = dropBoxesPointer.startDraft.position + dx;
+    state.draft.z = dropBoxesPointer.startDraft.z + dz;
+  } else {
+    const left = Math.min(dropBoxesPointer.anchorX, snappedX);
+    const right = Math.max(dropBoxesPointer.anchorX, snappedX);
+    const nearZ = Math.min(dropBoxesPointer.anchorZ, snappedZ);
+    const farZ = Math.max(dropBoxesPointer.anchorZ, snappedZ);
+    state.draft.position = Math.max(0, left);
+    state.draft.width = Math.max(minExtent, right - left);
+    state.draft.z = Math.max(0, nearZ);
+    state.draft.length = Math.max(minExtent, farZ - nearZ);
+  }
+  state.draft = sanitizeDropBoxItem(state.draft, state.paper.width, state.paper.length, dropBoxesMinExtent(state));
+  if (state.selectedIndex >= 0 && state.selectedIndex < state.boxes.length) {
+    state.boxes[state.selectedIndex] = { ...state.draft };
+  }
+  syncSelectedDropBoxesEdit(state);
+  refreshDropBoxesEditor();
+}
+
+function endDropBoxesPointer(ev) {
+  if (!dropBoxesPointer || ev.pointerId !== dropBoxesPointer.id) return;
+  dropBoxesPointer = null;
+  dropBoxesCanvasEl.style.cursor = "crosshair";
+}
+
+dropBoxesCanvasEl.addEventListener("dblclick", () => {
+  const current = currentDropBoxesVar();
+  if (!current) return;
+  fitDropBoxesView(current.dropboxes);
+  drawDropBoxesEditor();
+});
+
+dropBoxesCanvasEl.addEventListener("contextmenu", ev => ev.preventDefault());
+dropBoxesCanvasEl.addEventListener("wheel", ev => {
+  const current = currentDropBoxesVar();
+  if (!current) return;
+  ev.preventDefault();
+  if (!dropBoxesView) fitDropBoxesView(current.dropboxes);
+  const centerX = dropBoxesView.x + dropBoxesView.width / 2;
+  const centerY = dropBoxesView.y + dropBoxesView.height / 2;
+  const factor = Math.exp(ev.deltaY * 0.0012);
+  const nextWidth = Math.max(1, Math.min(5000, dropBoxesView.width * factor));
+  const nextHeight = Math.max(1, Math.min(5000, dropBoxesView.height * factor));
+  dropBoxesView = {
+    x: centerX - nextWidth / 2,
+    y: centerY - nextHeight / 2,
+    width: nextWidth,
+    height: nextHeight
+  };
+  dropBoxesViewAutoFit = false;
+  drawDropBoxesEditor();
+}, { passive: false });
 
 document.getElementById("apply").addEventListener("click", applyEditor);
 document.getElementById("addVar").addEventListener("click", () => {
@@ -2829,9 +4280,20 @@ controlSliderEl.addEventListener("input", () => {
   applyControlPreview();
 });
 varKindEl.addEventListener("change", () => {
-  const switchingToControl = varKindEl.value === "control";
+  const nextKind = varKindEl.value;
+  if (nextKind === "dropboxes" && !isDropBoxesVar(vars[selected]) && !isControlVar(vars[selected])) {
+    vars[selected] = makeDropBoxesVar(varNameEl.value.trim() || vars[selected].name, varDescEl.value.trim(), defaultDropBoxesSpec());
+    displayedDesign = selected;
+    refreshUI();
+    renderAll();
+    return;
+  }
+  const switchingToControl = nextKind === "control";
+  const switchingToDropBoxes = nextKind === "dropboxes" && isDropBoxesVar(vars[selected]);
   controlFieldsEl.hidden = !switchingToControl;
+  dropBoxesEditorEl.hidden = !switchingToDropBoxes;
   dataEl.hidden = switchingToControl;
+  dataEl.readOnly = switchingToDropBoxes;
   document.getElementById("designHelp").hidden = switchingToControl;
 });
 function applyControlPreview() {
@@ -2860,8 +4322,56 @@ controlMinEl.addEventListener("change", applyControlPreview);
 controlMaxEl.addEventListener("change", applyControlPreview);
 controlStepEl.addEventListener("change", applyControlPreview);
 controlSliderEl.addEventListener("change", applyControlPreview);
+dropPaperLengthEl.addEventListener("change", updateDropBoxesPaperFromInputs);
+dropPaperWidthEl.addEventListener("change", updateDropBoxesPaperFromInputs);
+dropPaperHeightEl.addEventListener("change", updateDropBoxesPaperFromInputs);
+dropGridStepEl.addEventListener("change", updateDropBoxesEditorPrefs);
+dropSnapEl.addEventListener("change", updateDropBoxesEditorPrefs);
+dropBoxPositionEl.addEventListener("change", updateDropBoxesDraftFromInputs);
+dropBoxZEl.addEventListener("change", updateDropBoxesDraftFromInputs);
+dropBoxWidthEl.addEventListener("change", updateDropBoxesDraftFromInputs);
+dropBoxLengthEl.addEventListener("change", updateDropBoxesDraftFromInputs);
+dropBoxHeightEl.addEventListener("change", updateDropBoxesDraftFromInputs);
+dropPaperLengthEl.addEventListener("input", updateDropBoxesPaperFromInputs);
+dropPaperWidthEl.addEventListener("input", updateDropBoxesPaperFromInputs);
+dropPaperHeightEl.addEventListener("input", updateDropBoxesPaperFromInputs);
+dropGridStepEl.addEventListener("input", updateDropBoxesEditorPrefs);
+dropBoxPositionEl.addEventListener("input", updateDropBoxesDraftFromInputs);
+dropBoxZEl.addEventListener("input", updateDropBoxesDraftFromInputs);
+dropBoxWidthEl.addEventListener("input", updateDropBoxesDraftFromInputs);
+dropBoxLengthEl.addEventListener("input", updateDropBoxesDraftFromInputs);
+dropBoxHeightEl.addEventListener("input", updateDropBoxesDraftFromInputs);
+dropBoxNewEl.addEventListener("click", newDropBoxesDraft);
+dropBoxDeleteEl.addEventListener("click", deleteSelectedDropBox);
+dropBoxesCanvasEl.addEventListener("pointerdown", beginDropBoxesPointer);
+dropBoxesCanvasEl.addEventListener("pointermove", moveDropBoxesPointer);
+dropBoxesCanvasEl.addEventListener("pointerup", endDropBoxesPointer);
+dropBoxesCanvasEl.addEventListener("pointercancel", endDropBoxesPointer);
 document.getElementById("resetPanes").addEventListener("click", resetPanes);
-window.addEventListener("resize", applyPaneWeights);
+window.addEventListener("resize", () => {
+  patternViewAutoFit = true;
+  dropBoxesViewAutoFit = true;
+  applyPaneWeights();
+  drawDropBoxesEditor();
+  drawPattern();
+});
+
+if ("serial" in navigator) {
+  navigator.serial.addEventListener("disconnect", () => {
+    plotterPort = null;
+    plotterSerialInfoEl.textContent = "Plotter serial: disconnected by device";
+    logPlotterStatus("Serial device disconnected.");
+  });
+} else {
+  plotterConnectEl.disabled = true;
+  plotterDisconnectEl.disabled = true;
+  plotterSendBorderEl.disabled = true;
+  plotterSendCutsEl.disabled = true;
+  plotterSendValleysEl.disabled = true;
+  plotterSendMountainsEl.disabled = true;
+  plotterSerialInfoEl.textContent = "Plotter serial: Web Serial unavailable";
+  logPlotterStatus("Web Serial is unavailable here. Use recent Chrome or Edge over HTTPS or localhost.");
+}
 
 syncViewTheme();
 refreshUI();

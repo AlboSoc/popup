@@ -159,6 +159,10 @@ button.small {
   grid-template-rows: auto auto 1fr auto;
 }
 
+#opsWrap:has(#dropBoxesEditor:not([hidden])) {
+  grid-template-rows: auto auto auto auto auto auto auto;
+}
+
 #data {
   width: 100%;
   box-sizing: border-box;
@@ -173,6 +177,14 @@ button.small {
 #data {
   min-height: 260px;
   height: 100%;
+}
+
+#opsWrap:has(#dropBoxesEditor:not([hidden])) #data {
+  min-height: 5.8em;
+  max-height: 7.8em;
+  height: 5.8em;
+  resize: none;
+  overflow: auto;
 }
 
 #status,
@@ -195,6 +207,26 @@ button.small {
   height: 100%;
   display: block;
   touch-action: none;
+}
+
+#panePattern {
+  display: flex;
+  flex-direction: column;
+}
+
+.patternViewport {
+  position: relative;
+  min-height: 220px;
+  flex: 1 1 auto;
+}
+
+#panePattern > .patternViewport > #pattern {
+  min-height: 220px;
+  cursor: grab;
+}
+
+#panePattern > .patternViewport > #pattern:active {
+  cursor: grabbing;
 }
 
 #pane3d > #view3d,
@@ -223,14 +255,136 @@ body[data-view-theme="dark-webgl"] #view3dgl {
 }
 
 .legend {
-  position: absolute;
-  left: 9px;
-  bottom: 8px;
-  z-index: 5;
   padding: 6px 8px;
   background: rgba(255, 255, 255, 0.86);
   border-radius: 8px;
   font-size: 12px;
+}
+
+.patternViewport > .legend {
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  bottom: 8px;
+  z-index: 5;
+}
+
+.plotterDivider {
+  cursor: row-resize;
+  position: relative;
+  touch-action: none;
+  flex: 0 0 10px;
+}
+
+.plotterDivider::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  background: rgba(120, 112, 98, 0.55);
+  border-radius: 999px;
+  box-shadow: 0 -4px 0 rgba(120, 112, 98, 0.18), 0 4px 0 rgba(120, 112, 98, 0.18);
+}
+
+.plotterDivider[hidden] {
+  display: none;
+}
+
+.plotterPanel {
+  border: 1px solid rgba(141, 133, 120, 0.35);
+  border-radius: 10px;
+  background: rgba(255, 252, 247, 0.9);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+#panePattern > .plotterPanel[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: var(--plotterPanelHeight, 220px);
+  flex-basis: var(--plotterPanelHeight, 220px);
+  min-height: 54px;
+}
+
+.plotterPanel > summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4d473f;
+  user-select: none;
+}
+
+.plotterPanelBody {
+  padding: 0 10px 10px;
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.plotterControls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.plotterControls input {
+  min-width: 0;
+  border: 1px solid #bbb;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: #fffefb;
+}
+
+.plotterToggle {
+  align-self: stretch;
+  justify-content: center;
+}
+
+.plotterButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plotterButtons .small {
+  pointer-events: auto;
+}
+
+.plotterMeta {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #5d584f;
+}
+
+#plotterCommandPreview,
+#plotterStatusLog {
+  width: 100%;
+  min-height: 92px;
+  margin: 0;
+  border: 1px solid rgba(38, 34, 29, 0.15);
+  border-radius: 10px;
+  background: #fffefb;
+  color: #1a1815;
+  font: 12px/1.45 Consolas, "Courier New", monospace;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+#plotterCommandPreview {
+  resize: vertical;
+}
+
+#plotterStatusLog {
+  min-height: 74px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .hint3d {
@@ -412,6 +566,150 @@ code {
   display: none;
 }
 
+.dropBoxesEditor {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+}
+
+.dropBoxesEditor[hidden] {
+  display: none !important;
+}
+
+.dropBoxesTop {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 6px;
+  align-items: end;
+}
+
+.dropBoxesBoxRow {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  gap: 6px;
+  align-items: end;
+}
+
+.dropToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border: 1px solid #bbb;
+  border-radius: 8px;
+  background: #fffefb;
+  min-height: 36px;
+  box-sizing: border-box;
+}
+
+.dropToggle input {
+  margin: 0;
+}
+
+#dropBoxesCanvas {
+  width: 100%;
+  min-height: 260px;
+  height: 320px;
+  display: block;
+  border: 1px solid rgba(23, 32, 42, 0.16);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(54, 95, 132, 0.035), rgba(54, 95, 132, 0)),
+    #fffefb;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.dropBoxesBottom {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.dropBoxesListWrap {
+  border: 1px solid rgba(23, 32, 42, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 254, 251, 0.9);
+  padding: 8px;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto;
+}
+
+.dropBoxesListActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+}
+
+.dropBoxesInspector input,
+.dropBoxesTop input,
+.dropBoxesBoxRow input {
+  min-width: 0;
+  border: 1px solid #bbb;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: #fffefb;
+}
+
+.dropBoxesButtons {
+  align-self: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dropBoxesList {
+  display: grid;
+  gap: 4px;
+  min-height: 0;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.dropBoxesListRow {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.dropBoxesListRow:hover {
+  background: rgba(40, 116, 166, 0.05);
+}
+
+.dropBoxesListRow.selected {
+  background: rgba(40, 116, 166, 0.1);
+  border-color: rgba(40, 116, 166, 0.28);
+}
+
+.dropBoxesListIndex {
+  font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #5d584f;
+}
+
+.dropBoxesListMeta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dropBoxesListTitle {
+  font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #17202a;
+}
+
+.dropBoxesListDims {
+  font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #6b6b6b;
+}
+
 .danger {
   border-color: #b94a48;
   color: #7d2724;
@@ -444,6 +742,10 @@ body[data-view-theme="dark-webgl"] #viewCube {
 }
 
 @media (max-width: 950px) {
+  .plotterControls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   #panes {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(46px, 24fr) 8px minmax(46px, 26fr) 8px minmax(46px, 25fr) 8px minmax(46px, 25fr);
@@ -465,5 +767,18 @@ body[data-view-theme="dark-webgl"] #viewCube {
 
   .controlGrid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .dropBoxesTop,
+  .dropBoxesBoxRow {
+    grid-template-columns: 1fr;
+  }
+
+  .dropBoxesBottom {
+    grid-template-columns: 1fr;
+  }
+
+  .dropBoxesListActions {
+    justify-content: stretch;
   }
 }
