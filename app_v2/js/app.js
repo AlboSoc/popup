@@ -1826,12 +1826,15 @@ function dropBoxesMinExtent(state) {
 }
 
 function makeDropBoxesDefaultDraft(state) {
+  const activeBox = state && state.draft
+    ? state.draft
+    : (state && state.selectedIndex >= 0 && state.selectedIndex < state.boxes.length ? state.boxes[state.selectedIndex] : null);
   return sanitizeDropBoxItem({
-    length: 1,
-    width: 1,
-    height: 1,
-    position: 1,
-    z: 1
+    length: activeBox ? activeBox.length : 1,
+    width: activeBox ? activeBox.width : 1,
+    height: activeBox ? activeBox.height : 1,
+    position: activeBox ? activeBox.position : 1,
+    z: activeBox ? activeBox.z : 1
   }, state.paper.width, state.paper.length, dropBoxesMinExtent(state));
 }
 
