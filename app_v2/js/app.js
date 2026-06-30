@@ -143,6 +143,8 @@ const dropBoxesListEl = document.getElementById("dropBoxesList");
 const statusEl = document.getElementById("status");
 const opStatusEl = document.getElementById("opStatus");
 const varListEl = document.getElementById("varList");
+const copyVarEl = document.getElementById("copyVar");
+const pasteVarEl = document.getElementById("pasteVar");
 const pattern = document.getElementById("pattern");
 const plotterOriginXEl = document.getElementById("plotterOriginX");
 const plotterOriginYEl = document.getElementById("plotterOriginY");
@@ -2217,6 +2219,61 @@ async function readClipboard() {
   throw Error("Clipboard read is not available here. Paste manually into the model input.");
 }
 
+function variableClipboardPayload(v) {
+  return {
+    kind: v.kind || "design",
+    name: v.name,
+    description: v.description || "",
+    source: typeof v.source === "string" ? v.source : "",
+    control: v.control ? { ...v.control } : undefined,
+    dropboxes: v.dropboxes ? JSON.parse(JSON.stringify(v.dropboxes)) : undefined
+  };
+}
+
+function parseVariableClipboardText(text) {
+  const parsed = JSON.parse(text);
+  if (Array.isArray(parsed)) {
+    if (parsed.length !== 1) throw Error("Clipboard contains multiple variables. Paste a single variable definition.");
+    return parsed[0];
+  }
+  if (parsed && Array.isArray(parsed.variables)) {
+    if (parsed.variables.length !== 1) throw Error("Clipboard contains multiple variables. Paste a single variable definition.");
+    return parsed.variables[0];
+  }
+  if (parsed && typeof parsed === "object") return parsed;
+  throw Error("Expected a variable object in the clipboard.");
+}
+
+function nextVariantVarName(baseName, usedNames) {
+  const normalizedBase = /^[A-Za-z_][A-Za-z0-9_]*$/.test(baseName) ? baseName : "v";
+  if (!usedNames.has(normalizedBase)) return normalizedBase;
+  let suffix = 2;
+  while (usedNames.has(`${normalizedBase}${suffix}`)) suffix += 1;
+  return `${normalizedBase}${suffix}`;
+}
+
+function importedVarFromRaw(raw, usedNames = new Set()) {
+  const requestedName = typeof raw.name === "string" ? raw.name.trim() : "";
+  const name = nextVariantVarName(requestedName || "v", usedNames);
+  return importedVarFromRawWithName(raw, name);
+}
+
+function importedVarFromRawWithName(raw, name) {
+  if ((raw.kind || "design") === "control") {
+    const control = raw.control || (typeof raw.value === "number" ? { value: raw.value } : defaultControlSpec());
+    return makeControlVar(name, raw.description || "", control);
+  }
+  if ((raw.kind || "design") === "dropboxes") {
+    return makeDropBoxesVar(name, raw.description || "", raw.dropboxes || defaultDropBoxesSpec());
+  }
+  const source = typeof raw.source === "string"
+    ? raw.source
+    : raw.value
+      ? pretty(raw.value)
+      : pretty(examples.step);
+  return makeVar(name, raw.description || "", source);
+}
+
 function sanitizeImportedVariables(items) {
   const out = [];
   const names = new Set();
@@ -2229,22 +2286,43 @@ function sanitizeImportedVariables(items) {
       name = `${baseName}_${suffix}`;
       suffix += 1;
     }
-    names.add(name);
-    if ((raw.kind || "design") === "control") {
-      const control = raw.control || (typeof raw.value === "number" ? { value: raw.value } : defaultControlSpec());
-      out.push(makeControlVar(name, raw.description || "", control));
-    } else if ((raw.kind || "design") === "dropboxes") {
-      out.push(makeDropBoxesVar(name, raw.description || "", raw.dropboxes || defaultDropBoxesSpec()));
-    } else {
-      const source = typeof raw.source === "string"
-        ? raw.source
-        : raw.value
-          ? pretty(raw.value)
-          : pretty(examples.step);
-      out.push(makeVar(name, raw.description || "", source));
-    }
+    const created = importedVarFromRawWithName(raw, name);
+    names.add(created.name);
+    out.push(created);
   }
   return out;
+}
+
+async function copySelectedVarToClipboard() {
+  const current = vars[selected];
+  if (!current) throw Error("Select a variable to copy.");
+  await writeClipboard(JSON.stringify(variableClipboardPayload(current), null, 2));
+  setOpStatus(`Copied ${current.name} to the clipboard.`);
+}
+
+async function pasteVarFromClipboard() {
+  const raw = parseVariableClipboardText(await readClipboard());
+  const usedNames = new Set(vars.map(v => v.name));
+  const created = importedVarFromRaw(raw, usedNames);
+  const priorVars = clone(vars);
+  const priorSelected = selected;
+  const priorDisplayedDesign = displayedDesign;
+  try {
+    vars.push(created);
+    setSelected(vars.length - 1);
+    if (isDesignVar(created)) displayedDesign = selected;
+    recomputeAllDesigns();
+    refreshUI();
+    renderAll();
+    setOpStatus(`Pasted ${created.name} from the clipboard.`);
+  } catch (e) {
+    vars = priorVars;
+    selected = priorSelected;
+    displayedDesign = priorDisplayedDesign;
+    refreshUI();
+    renderAll();
+    throw e;
+  }
 }
 
 function loadModelFromText(text) {
@@ -4360,6 +4438,20 @@ document.getElementById("addVar").addEventListener("click", () => {
   setOpStatus(`Added ${vars[selected].name}.`);
 });
 document.getElementById("removeVar").addEventListener("click", removeVarRecord);
+copyVarEl.addEventListener("click", async () => {
+  try {
+    await copySelectedVarToClipboard();
+  } catch (e) {
+    setOpStatus(e.message, true);
+  }
+});
+pasteVarEl.addEventListener("click", async () => {
+  try {
+    await pasteVarFromClipboard();
+  } catch (e) {
+    setOpStatus(e.message, true);
+  }
+});
 document.getElementById("saveModel").addEventListener("click", async () => {
   try {
     const text = serializeModel(true);
